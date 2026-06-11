@@ -16,6 +16,7 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.yomiyoga.studio",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Camera access is used by staff and admins to scan booking check-in QR codes.",
         "NSPhotoLibraryUsageDescription": "Photo library access is used by admins to upload coach, content, and product images."
       }
