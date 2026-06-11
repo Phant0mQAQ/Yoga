@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node apps/api/server.js",
     "start:supabase": "node --env-file=.env apps/api/server.js",
-    "test": "node tests/domain.test.js && node tests/store-repository.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
+    "test": "node tests/domain.test.js && node tests/admin-web.test.js && node tests/store-repository.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
     "preflight": "node scripts/release-preflight.mjs",
     "preflight:cloud": "node scripts/release-preflight.mjs --cloud"
   },

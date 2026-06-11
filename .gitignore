@@ -11,5 +11,6 @@ apps/mobile-expo/expo.stderr.log
 apps/mobile-expo/dist*/
 apps/admin/dist/
 .playwright-cli/
+.tmp-admin-preview/
 output/
 supabase/.temp/
