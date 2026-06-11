@@ -1,0 +1,72 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "Available Classes" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "예약 가능한 수업" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可预约课程" } }
+      }
+    },
+    "Book" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "예약" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "预约" } }
+      }
+    },
+    "Coach" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "강사" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "教练" } }
+      }
+    },
+    "Email or phone" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "이메일 또는 전화번호" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "邮箱或手机号" } }
+      }
+    },
+    "Member Card" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "회원권" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会员卡" } }
+      }
+    },
+    "Payment Methods" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "결제 수단" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "支付方式" } }
+      }
+    },
+    "Request OTP" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "인증번호 요청" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "获取验证码" } }
+      }
+    },
+    "Sign In" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "로그인" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录" } }
+      }
+    },
+    "Staff" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "직원" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "员工" } }
+      }
+    },
+    "Student" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "회원" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "学员" } }
+      }
+    },
+    "Yoga Booking" : {
+      "localizations" : {
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "요가 예약" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "瑜伽预约" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

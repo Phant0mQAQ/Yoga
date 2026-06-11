@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f6f2">
+    <title>Yomi Yoga Studio</title>
+    <link rel="icon" href="/admin/assets/yomi-icon.png">
+    <link rel="stylesheet" href="/admin/styles.css">
+  </head>
+  <body>
+    <div class="app-frame">
+      <aside class="sidebar">
+        <div class="brand">
+          <img src="/admin/assets/yomi-icon.png" alt="">
+          <div>
+            <strong>Yomi Yoga</strong>
+            <span>Studio OS</span>
+          </div>
+        </div>
+        <nav class="side-nav" aria-label="Admin navigation">
+          <button class="active" type="button"><span>01</span>Overview</button>
+          <button type="button"><span>02</span>Members</button>
+          <button type="button"><span>03</span>Schedule</button>
+          <button type="button"><span>04</span>Content</button>
+          <button type="button"><span>05</span>Commerce</button>
+          <button type="button"><span>06</span>Settings</button>
+        </nav>
+        <div class="side-foot">
+          <span class="live-dot"></span>
+          API connected
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">STUDIO OPERATIONS</p>
+            <h1>Good morning, Admin.</h1>
+            <p class="subtitle">Here is what is happening across Yomi Yoga today.</p>
+          </div>
+          <div class="toolbar">
+            <select id="locale" aria-label="Language">
+              <option value="en">English</option>
+              <option value="zh-Hans">简体中文</option>
+              <option value="ko">한국어</option>
+            </select>
+            <button id="refreshBtn" class="icon-action" type="button" title="Refresh">↻</button>
+          </div>
+        </header>
+
+        <section class="login-view" id="loginPanel">
+          <div class="login-copy">
+            <img src="/admin/assets/yomi-icon.png" alt="">
+            <p class="eyebrow">SECURE WORKSPACE</p>
+            <h2>Sign in to Yomi Studio OS</h2>
+            <p>Manage members, classes, payments, content, and front-desk operations from one workspace.</p>
+          </div>
+          <div class="login-form">
+            <label>Email<input id="email" type="email" autocomplete="username"></label>
+            <label>Password<input id="password" type="password" autocomplete="current-password"></label>
+            <div class="actions">
+              <button id="loginBtn" type="button">Sign in</button>
+            </div>
+            <p id="loginHint" class="hint">Use the administrator credentials configured for this environment.</p>
+          </div>
+        </section>
+
+        <section class="summary-grid" id="summaryGrid" hidden>
+          <article><span class="metric-index">01</span><strong id="courseCount">0</strong><label>Courses</label></article>
+          <article><span class="metric-index">02</span><strong id="bookingCount">0</strong><label>Bookings</label></article>
+          <article><span class="metric-index">03</span><strong id="memberCardCount">0</strong><label>Member cards</label></article>
+          <article><span class="metric-index">04</span><strong id="paymentCount">0</strong><label>Payments</label></article>
+        </section>
+
+        <section class="content-grid" id="contentPanel" hidden>
+          <article class="panel">
+            <div class="section-head">
+              <div><p class="eyebrow">TODAY</p><h2>Class availability</h2></div>
+              <button id="demoBookingBtn" class="secondary" type="button">Create demo booking</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Course</th><th>Coach</th><th>Start</th><th>Open</th></tr></thead>
+                <tbody id="availabilityRows"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="section-head"><div><p class="eyebrow">FRONT DESK</p><h2>Recent bookings</h2></div></div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Member</th><th>Course</th><th>Status</th><th></th></tr></thead>
+                <tbody id="bookingRows"></tbody>
+              </table>
+            </div>
+          </article>
+        </section>
+
+        <section class="panel" id="paymentPanel" hidden>
+          <div class="section-head">
+            <div><p class="eyebrow">STRIPE</p><h2>Payment methods</h2></div>
+            <div class="payment-controls">
+              <select id="country" aria-label="Country">
+                <option value="HK">Hong Kong</option>
+                <option value="KR">South Korea</option>
+                <option value="CN">China</option>
+                <option value="US">United States</option>
+              </select>
+              <select id="currency" aria-label="Currency">
+                <option value="HKD">HKD</option><option value="KRW">KRW</option>
+                <option value="CNY">CNY</option><option value="USD">USD</option>
+              </select>
+              <button id="loadMethodsBtn" type="button">Refresh methods</button>
+            </div>
+          </div>
+          <div id="paymentMethods" class="method-list"></div>
+        </section>
+
+        <section class="panel" id="auditPanel" hidden>
+          <div class="section-head"><div><p class="eyebrow">SECURITY</p><h2>Audit history</h2></div><span class="readonly">Read only</span></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Entity</th></tr></thead>
+              <tbody id="auditRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/admin/config.js"></script>
+    <script src="/admin/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,434 @@
+openapi: 3.1.0
+info:
+  title: Yoga Booking API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8090/api/v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+    LocalizedText:
+      type: object
+      properties:
+        en:
+          type: string
+        zh-Hans:
+          type: string
+        ko:
+          type: string
+    LoginRequest:
+      type: object
+      required: [email, password, role]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+        role:
+          enum: [student, coach, staff, admin]
+        locale:
+          enum: [en, zh-Hans, ko]
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        courseId:
+          type: string
+        courseSessionId:
+          type: string
+        coachId:
+          type: string
+        status:
+          enum: [pending_payment, confirmed, cancelled, checked_in]
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+    Participant:
+      type: object
+      properties:
+        id:
+          type: string
+        bookingId:
+          type: string
+        name:
+          type: string
+        initials:
+          type: string
+        avatarUrl:
+          type:
+            - string
+            - "null"
+        color:
+          type: string
+        status:
+          type: string
+    PaymentMethod:
+      type: object
+      properties:
+        code:
+          enum: [card, link, paypal, alipay, wechat_pay, kr_card, kakao_pay, naver_pay, samsung_pay, payco]
+        family:
+          enum: [card, wallet, local_wallet]
+        flow:
+          enum: [native_or_checkout, redirect, checkout_redirect]
+        recurring:
+          type: boolean
+paths:
+  /auth/login:
+    post:
+      security: []
+      summary: Login and lock the active role for the session.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session token and user profile.
+  /auth/logout:
+    post:
+      summary: Revoke the current role session.
+      responses:
+        "200":
+          description: Logged out.
+  /me:
+    get:
+      summary: Current user and active role.
+      responses:
+        "200":
+          description: Current user.
+  /home:
+    get:
+      security: []
+      summary: Localized home page content.
+      parameters:
+        - name: locale
+          in: query
+          schema:
+            enum: [en, zh-Hans, ko]
+      responses:
+        "200":
+          description: Home content.
+  /courses:
+    get:
+      security: []
+      summary: List courses.
+      responses:
+        "200":
+          description: Courses.
+  /courses/{id}:
+    get:
+      security: []
+      summary: Course detail.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Course.
+  /coaches:
+    get:
+      security: []
+      summary: List coaches.
+      responses:
+        "200":
+          description: Coaches.
+  /coaches/{id}:
+    get:
+      security: []
+      summary: Coach detail.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Coach.
+  /availability:
+    get:
+      security: []
+      summary: Available course sessions.
+      parameters:
+        - name: coachId
+          in: query
+          schema:
+            type: string
+        - name: courseId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Availability.
+  /bookings:
+    get:
+      summary: List bookings visible to current role.
+      responses:
+        "200":
+          description: Bookings.
+    post:
+      summary: Create a booking.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [courseSessionId, paymentMode]
+              properties:
+                userId:
+                  type: string
+                  description: Required for staff/admin-created bookings.
+                courseSessionId:
+                  type: string
+                paymentMode:
+                  enum: [member_card, payment]
+      responses:
+        "201":
+          description: Booking and optional order.
+  /bookings/{id}:
+    get:
+      summary: Booking detail.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking.
+  /bookings/{id}/cancel:
+    post:
+      summary: Cancel a booking.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Cancelled booking.
+  /bookings/{id}/reschedule:
+    post:
+      summary: Reschedule a booking.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Rescheduled booking.
+  /bookings/{id}/check-in:
+    post:
+      summary: Check in a booking.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Check-in result.
+  /member-cards:
+    get:
+      summary: List member cards visible to current role.
+      responses:
+        "200":
+          description: Member cards.
+  /member-cards/{id}/transactions:
+    get:
+      summary: Member card transaction history.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Transactions.
+  /member-cards/{id}/freeze:
+    post:
+      summary: Freeze a member card.
+      responses:
+        "200":
+          description: Updated card.
+  /member-cards/{id}/extend:
+    post:
+      summary: Extend a member card.
+      responses:
+        "200":
+          description: Updated card.
+  /member-cards/{id}/transfer:
+    post:
+      summary: Transfer a member card.
+      responses:
+        "200":
+          description: Updated card.
+  /member-cards/{id}/upgrade:
+    post:
+      summary: Upgrade a member card.
+      responses:
+        "200":
+          description: Updated card.
+  /products:
+    get:
+      security: []
+      summary: List store products.
+      responses:
+        "200":
+          description: Products.
+  /orders:
+    get:
+      summary: List orders visible to current role.
+      responses:
+        "200":
+          description: Orders.
+    post:
+      summary: Create a product order.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "201":
+          description: Order.
+  /orders/{id}:
+    get:
+      summary: Order detail.
+      responses:
+        "200":
+          description: Order.
+  /payments/methods:
+    get:
+      security: []
+      summary: Eligible Stripe payment methods for country/currency.
+      parameters:
+        - name: country
+          in: query
+          schema:
+            type: string
+            default: HK
+        - name: currency
+          in: query
+          schema:
+            type: string
+            default: HKD
+        - name: recurring
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        "200":
+          description: Payment methods.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PaymentMethod"
+  /payments/stripe/payment-intents:
+    post:
+      summary: Create Stripe PaymentIntent.
+      responses:
+        "201":
+          description: Payment and Stripe payload.
+  /payments/stripe/checkout-sessions:
+    post:
+      summary: Create Stripe Checkout Session.
+      responses:
+        "201":
+          description: Payment and Stripe payload.
+  /payments/stripe/payment-sheet:
+    post:
+      summary: Create Stripe PaymentSheet payload for Expo or React Native clients.
+      responses:
+        "201":
+          description: Payment, PaymentIntent client secret, publishable key, and merchant identifier.
+  /payments/{id}/refunds:
+    post:
+      summary: Refund a payment.
+      responses:
+        "201":
+          description: Refund.
+  /payments/stripe/webhook:
+    post:
+      security: []
+      summary: Stripe webhook receiver.
+      responses:
+        "200":
+          description: Webhook applied or ignored.
+  /admin/dashboard:
+    get:
+      summary: Admin mobile dashboard metrics and pending work.
+      responses:
+        "200":
+          description: Dashboard.
+  /admin/members:
+    get:
+      summary: List members with cards, bookings, orders, reviews, and body metrics.
+      responses:
+        "200":
+          description: Members.
+  /admin/members/{id}:
+    get:
+      summary: Member detail.
+      responses:
+        "200":
+          description: Member.
+    patch:
+      summary: Update member profile fields.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Updated member.
+  /admin/uploads/presign:
+    post:
+      summary: Create an upload URL for mobile admin image uploads.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: Presigned upload metadata.

@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+*.log
+
+node_modules/
+apps/mobile-expo/.expo/
+apps/mobile-expo/.expo-*/
+apps/mobile-expo/expo.stdout.log
+apps/mobile-expo/expo.stderr.log
+apps/mobile-expo/dist*/
+apps/admin/dist/
+.playwright-cli/
+output/
+supabase/.temp/
