@@ -80,7 +80,18 @@ The repository includes `render.yaml`. In Render:
    suitable for production uptime.
 5. Enter every variable marked `sync: false`.
 
-Required Render variables:
+The free cloud-test Blueprint only asks for:
+
+```text
+SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+SUPABASE_SECRET_KEY=<Supabase server secret>
+```
+
+Render generates `APP_SECRET`, and the API reads its public URL from
+`RENDER_EXTERNAL_URL`. Stripe remains in mock mode, CORS is open for the test
+clients, and the local demo accounts remain available.
+
+Required variables when promoting the service to production:
 
 ```text
 APP_BASE_URL=https://YOUR_RENDER_SERVICE.onrender.com
@@ -96,12 +107,10 @@ INITIAL_ADMIN_EMAIL=<private administrator email>
 INITIAL_ADMIN_PASSWORD=<unique password, at least 12 characters>
 ```
 
-The checked-in free environment uses `NODE_ENV=staging`, so Stripe can remain
-in mock mode while the application is tested. Before App Store production,
-change the Blueprint to `NODE_ENV=production`, use a paid always-on instance,
-and configure all Stripe and administrator secrets. The first production
-startup removes the known demo login identities and creates the configured
-administrator login.
+Before App Store production, change the Blueprint to `NODE_ENV=production`,
+use a paid always-on instance, restrict `CORS_ALLOWED_ORIGINS`, and configure
+all Stripe and administrator secrets. The first production startup removes the
+known demo login identities and creates the configured administrator login.
 
 Verify:
 

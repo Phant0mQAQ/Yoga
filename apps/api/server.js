@@ -891,7 +891,9 @@ function setCors(req, res) {
 }
 
 function baseUrl() {
-  return process.env.APP_BASE_URL ?? `http://localhost:${port}`;
+  return process.env.APP_BASE_URL
+    ?? process.env.RENDER_EXTERNAL_URL
+    ?? `http://localhost:${port}`;
 }
 
 function isInsideDirectory(rootDir, candidate) {
