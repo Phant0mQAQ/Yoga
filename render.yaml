@@ -3,7 +3,7 @@ services:
     name: yomi-yoga-api
     runtime: node
     region: singapore
-    plan: starter
+    plan: free
     numInstances: 1
     buildCommand: npm install --omit=dev
     startCommand: npm start
@@ -11,7 +11,7 @@ services:
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
-        value: production
+        value: staging
       - key: APP_BASE_URL
         sync: false
       - key: APP_SECRET

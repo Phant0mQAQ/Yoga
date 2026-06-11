@@ -75,7 +75,9 @@ The repository includes `render.yaml`. In Render:
 2. Connect the GitHub repository.
 3. Select `render.yaml`.
 4. Keep one API instance. The current JSONB compatibility repository is
-   intentionally single-instance.
+   intentionally single-instance. The checked-in Blueprint uses Render's free
+   instance for cloud testing. Free instances sleep when idle and are not
+   suitable for production uptime.
 5. Enter every variable marked `sync: false`.
 
 Required Render variables:
@@ -94,9 +96,12 @@ INITIAL_ADMIN_EMAIL=<private administrator email>
 INITIAL_ADMIN_PASSWORD=<unique password, at least 12 characters>
 ```
 
-The first production startup removes the known demo login identities and
-creates the configured administrator login. The service intentionally refuses
-to start if required production secrets are missing.
+The checked-in free environment uses `NODE_ENV=staging`, so Stripe can remain
+in mock mode while the application is tested. Before App Store production,
+change the Blueprint to `NODE_ENV=production`, use a paid always-on instance,
+and configure all Stripe and administrator secrets. The first production
+startup removes the known demo login identities and creates the configured
+administrator login.
 
 Verify:
 
