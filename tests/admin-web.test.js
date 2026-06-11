@@ -16,7 +16,7 @@ for (const corruptedText of ["绠", "浣", "頃", "鈫", "锟", "\uFFFD"]) {
 }
 
 const messagesStart = script.indexOf("const messages = ");
-const messagesEnd = script.indexOf("\n\nlet token", messagesStart);
+const messagesEnd = script.indexOf("\n\nconst viewMeta", messagesStart);
 assert.notEqual(messagesStart, -1, "translation dictionary is missing");
 assert.notEqual(messagesEnd, -1, "translation dictionary boundary is missing");
 
@@ -52,5 +52,20 @@ assert.equal(
   "API calls must be relative to the configured /api/v1 base URL"
 );
 assert.match(config, /endsWith\("\/api\/v1"\)/);
+assert.match(html, /id="themeBtn"/);
+assert.match(html, /id="logoutBtn"/);
+assert.equal([...html.matchAll(/data-view="([^"]+)"/g)].length, 6);
+for (const view of ["overview", "members", "schedule", "content", "commerce", "settings"]) {
+  assert.match(html, new RegExp(`data-view="${view}"`));
+  assert.match(script, new RegExp(`${view}: \\[`));
+}
+assert.match(script, /THEME_STORAGE_KEY/);
+assert.match(script, /async function logout\(\)/);
+assert.match(script, /\/admin\/members/);
+assert.match(script, /\/admin\/member-cards/);
+assert.match(script, /\/admin\/content-blocks/);
+assert.match(script, /\/admin\/membership-plans/);
+assert.match(script, /\/admin\/uploads\/presign/);
+assert.match(script, /\/admin\/payments\/\$\{encodeURIComponent\(id\)\}\/refunds/);
 
 console.log("admin Web localization tests passed");

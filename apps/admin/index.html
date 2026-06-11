@@ -19,12 +19,12 @@
           </div>
         </div>
         <nav class="side-nav" data-i18n-aria-label="adminNavigation">
-          <button class="active" type="button"><span>01</span><span data-i18n="overview">Overview</span></button>
-          <button type="button"><span>02</span><span data-i18n="members">Members</span></button>
-          <button type="button"><span>03</span><span data-i18n="schedule">Schedule</span></button>
-          <button type="button"><span>04</span><span data-i18n="content">Content</span></button>
-          <button type="button"><span>05</span><span data-i18n="commerce">Commerce</span></button>
-          <button type="button"><span>06</span><span data-i18n="settings">Settings</span></button>
+          <button class="active" type="button" data-view="overview" disabled><span>01</span><b data-i18n="overview">Overview</b></button>
+          <button type="button" data-view="members" disabled><span>02</span><b data-i18n="members">Members</b></button>
+          <button type="button" data-view="schedule" disabled><span>03</span><b data-i18n="schedule">Schedule</b></button>
+          <button type="button" data-view="content" disabled><span>04</span><b data-i18n="content">Content</b></button>
+          <button type="button" data-view="commerce" disabled><span>05</span><b data-i18n="commerce">Commerce</b></button>
+          <button type="button" data-view="settings" disabled><span>06</span><b data-i18n="settings">Settings</b></button>
         </nav>
         <div class="side-foot">
           <span class="live-dot"></span>
@@ -35,9 +35,9 @@
       <main class="workspace">
         <header class="topbar">
           <div>
-            <p class="eyebrow" data-i18n="studioOperations">STUDIO OPERATIONS</p>
-            <h1 data-i18n="greeting">Good morning, Admin.</h1>
-            <p class="subtitle" data-i18n="subtitle">Here is what is happening across Yomi Yoga today.</p>
+            <p class="eyebrow" id="pageEyebrow" data-i18n="studioOperations">STUDIO OPERATIONS</p>
+            <h1 id="pageTitle" data-i18n="greeting">Good morning, Admin.</h1>
+            <p class="subtitle" id="pageSubtitle" data-i18n="subtitle">Here is what is happening across Yomi Yoga today.</p>
           </div>
           <div class="toolbar">
             <select id="locale" aria-label="Language">
@@ -45,7 +45,9 @@
               <option value="zh-Hans">简体中文</option>
               <option value="ko">한국어</option>
             </select>
-            <button id="refreshBtn" class="icon-action" type="button" title="Refresh" aria-label="Refresh">↻</button>
+            <button id="themeBtn" class="icon-action secondary" type="button" title="Dark mode" aria-label="Dark mode">☾</button>
+            <button id="refreshBtn" class="icon-action secondary" type="button" title="Refresh" aria-label="Refresh" hidden>↻</button>
+            <button id="logoutBtn" class="logout-action" type="button" hidden><span aria-hidden="true">↪</span><span data-i18n="logout">Logout</span></button>
           </div>
         </header>
 
@@ -66,69 +68,31 @@
           </div>
         </section>
 
-        <section class="summary-grid" id="summaryGrid" hidden>
-          <article><span class="metric-index">01</span><strong id="courseCount">0</strong><label data-i18n="courses">Courses</label></article>
-          <article><span class="metric-index">02</span><strong id="bookingCount">0</strong><label data-i18n="bookings">Bookings</label></article>
-          <article><span class="metric-index">03</span><strong id="memberCardCount">0</strong><label data-i18n="memberCards">Member cards</label></article>
-          <article><span class="metric-index">04</span><strong id="paymentCount">0</strong><label data-i18n="payments">Payments</label></article>
-        </section>
-
-        <section class="content-grid" id="contentPanel" hidden>
-          <article class="panel">
-            <div class="section-head">
-              <div><p class="eyebrow" data-i18n="today">TODAY</p><h2 data-i18n="classAvailability">Class availability</h2></div>
-              <button id="demoBookingBtn" class="secondary" type="button" data-i18n="createDemoBooking">Create demo booking</button>
-            </div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th data-i18n="course">Course</th><th data-i18n="coach">Coach</th><th data-i18n="start">Start</th><th data-i18n="open">Open</th></tr></thead>
-                <tbody id="availabilityRows"></tbody>
-              </table>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="section-head"><div><p class="eyebrow" data-i18n="frontDesk">FRONT DESK</p><h2 data-i18n="recentBookings">Recent bookings</h2></div></div>
-            <div class="table-wrap">
-              <table>
-                <thead><tr><th data-i18n="member">Member</th><th data-i18n="course">Course</th><th data-i18n="status">Status</th><th></th></tr></thead>
-                <tbody id="bookingRows"></tbody>
-              </table>
-            </div>
-          </article>
-        </section>
-
-        <section class="panel" id="paymentPanel" hidden>
-          <div class="section-head">
-            <div><p class="eyebrow">STRIPE</p><h2 data-i18n="paymentMethods">Payment methods</h2></div>
-            <div class="payment-controls">
-              <select id="country" aria-label="Country">
-                <option value="HK" data-i18n="hongKong">Hong Kong</option>
-                <option value="KR" data-i18n="southKorea">South Korea</option>
-                <option value="CN" data-i18n="china">China</option>
-                <option value="US" data-i18n="unitedStates">United States</option>
-              </select>
-              <select id="currency" aria-label="Currency">
-                <option value="HKD">HKD</option><option value="KRW">KRW</option>
-                <option value="CNY">CNY</option><option value="USD">USD</option>
-              </select>
-              <button id="loadMethodsBtn" type="button" data-i18n="refreshMethods">Refresh methods</button>
-            </div>
-          </div>
-          <div id="paymentMethods" class="method-list"></div>
-        </section>
-
-        <section class="panel" id="auditPanel" hidden>
-          <div class="section-head"><div><p class="eyebrow" data-i18n="security">SECURITY</p><h2 data-i18n="auditHistory">Audit history</h2></div><span class="readonly" data-i18n="readOnly">Read only</span></div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th data-i18n="time">Time</th><th data-i18n="actor">Actor</th><th data-i18n="action">Action</th><th data-i18n="entity">Entity</th></tr></thead>
-              <tbody id="auditRows"></tbody>
-            </table>
-          </div>
-        </section>
+        <section id="viewRoot" class="view-root" hidden aria-live="polite"></section>
       </main>
     </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-head">
+          <div>
+            <p class="eyebrow" data-i18n="editWorkspace">EDIT WORKSPACE</p>
+            <h2 id="modalTitle"></h2>
+          </div>
+          <button id="modalCloseBtn" class="icon-action secondary" type="button" aria-label="Close">×</button>
+        </div>
+        <form id="modalForm">
+          <div id="modalFields" class="form-grid"></div>
+          <p id="modalError" class="form-error" hidden></p>
+          <div class="modal-actions">
+            <button id="modalCancelBtn" class="secondary" type="button" data-i18n="cancel">Cancel</button>
+            <button id="modalSaveBtn" type="submit" data-i18n="save">Save</button>
+          </div>
+        </form>
+      </section>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
     <script src="/admin/config.js"></script>
     <script src="/admin/app.js"></script>
   </body>
