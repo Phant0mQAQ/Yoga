@@ -5,7 +5,10 @@ import { useTranslation } from "react-i18next";
 import type { Role } from "@/api/types";
 import { AppearanceControls, Field, PrimaryButton } from "@/components/ui";
 import { useSession } from "@/state/session";
-import { colors, radius, spacing } from "@/theme/tokens";
+import { useTheme, useThemedStyles } from "@/state/theme";
+import { radius, spacing } from "@/theme/tokens";
+import type { ThemeColors } from "@/theme/tokens";
+import { localizedApiError } from "@/utils/api-error";
 
 const primaryRoles: Array<{ role: Role; label: string; icon: "person-outline" | "body-outline" }> = [
   { role: "student", label: "student", icon: "person-outline" },
@@ -16,11 +19,13 @@ export default function AuthScreen() {
   const { t } = useTranslation();
   const session = useSession();
   const [role, setRole] = useState<Role>("student");
-  const [email, setEmail] = useState("student@example.com");
-  const [password, setPassword] = useState("Yomi@2026");
+  const [email, setEmail] = useState(__DEV__ ? "student@example.com" : "");
+  const [password, setPassword] = useState(__DEV__ ? "Yomi@2026" : "");
   const [busy, setBusy] = useState(false);
   const [showOperations, setShowOperations] = useState(false);
   const requestInFlight = useRef(false);
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
 
   async function signIn() {
     if (requestInFlight.current) return;
@@ -33,7 +38,7 @@ export default function AuthScreen() {
     try {
       await session.login(normalizedEmail, password, role);
     } catch (error) {
-      Alert.alert(t("signInFailed"), errorMessage(error));
+      Alert.alert(t("signInFailed"), localizedApiError(error, t));
     } finally {
       requestInFlight.current = false;
       setBusy(false);
@@ -42,8 +47,8 @@ export default function AuthScreen() {
 
   function chooseRole(nextRole: Role) {
     setRole(nextRole);
-    setEmail(defaultEmail(nextRole));
-    setPassword("Yomi@2026");
+    setEmail(__DEV__ ? defaultEmail(nextRole) : "");
+    setPassword(__DEV__ ? "Yomi@2026" : "");
   }
 
   return (
@@ -54,8 +59,12 @@ export default function AuthScreen() {
         </View>
 
         <View style={styles.intro}>
-          <Image source={require("../../assets/icon.png")} style={styles.logo} />
-          <Text style={styles.brand}>Yomi Yoga</Text>
+          <Image
+            accessibilityLabel="Good Vibe Pilates & Yoga logo"
+            resizeMode="contain"
+            source={require("../../assets/good-vibe-logo.png")}
+            style={styles.logo}
+          />
           <Text style={styles.tagline}>{t("tagline")}</Text>
           <Text style={styles.introCopy}>{t("intro")}</Text>
         </View>
@@ -87,7 +96,7 @@ export default function AuthScreen() {
         </View>
 
         <View style={styles.form}>
-          <Text style={styles.formTitle}>{t("signIn")} · {t(role)}</Text>
+          <Text style={styles.formTitle}>{t("signIn")} - {t(role)}</Text>
           <Field value={email} onChangeText={setEmail} placeholder={t("email")} keyboardType="email-address" />
           <Field value={password} onChangeText={setPassword} placeholder={t("password")} secureTextEntry />
           <PrimaryButton
@@ -96,7 +105,7 @@ export default function AuthScreen() {
             onPress={() => void signIn()}
             disabled={busy || !email.trim() || !password}
           />
-          <Text style={styles.demoNote}>{t("demoPassword")}: Yomi@2026</Text>
+          {__DEV__ ? <Text style={styles.demoNote}>{t("demoPassword")}: Yomi@2026</Text> : null}
           <Text style={styles.securityNote}>{t("roleLocked")}</Text>
         </View>
       </ScrollView>
@@ -117,6 +126,9 @@ function RoleButton({
   onPress: () => void;
   compact?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
+
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [
       styles.roleButton,
@@ -131,10 +143,6 @@ function RoleButton({
   );
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Request failed";
-}
-
 function defaultEmail(role: Role) {
   if (role === "coach") return "coach@example.com";
   if (role === "staff") return "staff@example.com";
@@ -142,13 +150,13 @@ function defaultEmail(role: Role) {
   return "student@example.com";
 }
 
-const styles = StyleSheet.create({
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.xl },
   preferenceRow: { minHeight: 40, flexDirection: "row", justifyContent: "flex-end", alignItems: "center" },
   intro: { alignItems: "center", paddingVertical: spacing.lg },
-  logo: { width: 88, height: 88, borderRadius: radius.lg, marginBottom: spacing.lg },
-  brand: { color: colors.text, fontSize: 36, fontWeight: "800" },
+  logo: { width: 210, height: 248, borderRadius: radius.lg, marginBottom: spacing.md },
   tagline: { color: colors.coral, fontSize: 15, fontWeight: "800", marginTop: spacing.xs },
   introCopy: { color: colors.muted, fontSize: 14, lineHeight: 21, textAlign: "center", maxWidth: 330, marginTop: spacing.sm },
   roleSection: { gap: spacing.sm },
@@ -176,4 +184,5 @@ const styles = StyleSheet.create({
   demoNote: { color: colors.muted, fontSize: 12, textAlign: "center" },
   securityNote: { color: colors.muted, fontSize: 11, lineHeight: 16, textAlign: "center" },
   pressed: { opacity: 0.72 }
-});
+  });
+}

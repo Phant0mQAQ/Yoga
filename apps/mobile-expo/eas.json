@@ -1,6 +1,6 @@
 {
   "cli": {
-    "version": ">= 12.0.0",
+    "version": ">= 16.0.1",
     "appVersionSource": "remote"
   },
   "build": {
@@ -9,7 +9,7 @@
       "distribution": "internal",
       "environment": "development",
       "ios": {
-        "resourceClass": "medium"
+        "resourceClass": "m-medium"
       }
     },
     "preview": {
@@ -23,7 +23,7 @@
       "autoIncrement": true,
       "environment": "production",
       "ios": {
-        "resourceClass": "medium"
+        "resourceClass": "m-medium"
       }
     }
   },

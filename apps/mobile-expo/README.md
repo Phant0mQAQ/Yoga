@@ -1,6 +1,6 @@
 # Expo Mobile App
 
-This is the Expo/React Native client for the yoga booking system. It replaces the SwiftUI skeleton for iOS distribution while keeping the existing `/api/v1` backend.
+This is the Expo/React Native client for Good Vibe Pilates & Yoga. It replaces the SwiftUI skeleton for iOS distribution while keeping the existing `/api/v1` backend.
 
 The project is pinned to Expo SDK 54 for Expo client `1017756` compatibility. Keep `expo`, React Native, Expo modules, and Stripe React Native aligned with `npx expo install --check`.
 
@@ -45,8 +45,15 @@ Use this build for Stripe PaymentSheet, Apple Pay, camera scanning, and realisti
 ## Production Build And Submit
 
 ```powershell
-eas build --profile production --platform ios
-eas submit --platform ios
+npx eas-cli@latest login
+npx eas-cli@latest init
+npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_API_BASE_URL --value https://YOUR_API_HOST/api/v1 --visibility plaintext
+npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY --value pk_live_REPLACE_WITH_CLIENT_KEY --visibility plaintext
+npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER --value merchant.com.yomiyoga.studio --visibility plaintext
+npx eas-cli@latest build --profile production --platform ios
+npx eas-cli@latest submit --profile production --platform ios
 ```
 
-You still need Apple Developer Program membership, App Store Connect app record, production HTTPS API, Stripe live keys, privacy policy, app screenshots, and review accounts.
+`EXPO_PUBLIC_*` values are compiled into the app and must never contain server secrets. The Stripe publishable key is public; the Stripe secret key remains on the API server.
+
+You still need Apple Developer Program membership, an App Store Connect app record, a production HTTPS API, Stripe live configuration, a public privacy policy, current iPhone screenshots, and private review accounts. See `../../docs/app-store-handoff/00-CLIENT-START-HERE.zh-CN.md`.

@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +13,7 @@ import {
   createPaymentRecord,
   createSeedStore,
   audit,
+  byIdRequired,
   getCurrentUser,
   getPaymentMethods,
   hardenProductionStore,
@@ -20,25 +22,37 @@ import {
   login,
   logout,
   memberCardOperation,
-  PAYMENT_STATUS,
+  normalizeMemberCardStatus,
+  normalizeIdentity,
+  prepareRefund,
   problem,
+  recordRefund,
+  releasePendingOrderResources,
   requireRole,
   repairKnownTranslations,
   rescheduleBooking,
-  ROLES
+  ROLES,
+  validatePaymentRequest
 } from "./src/domain.js";
 import { signToken, verifyToken } from "./src/auth.js";
 import {
   createStripeCheckoutSession,
   createStripePaymentSheet,
   createStripePaymentIntent,
+  createStripeRefund,
   verifyStripeWebhook
 } from "./src/stripe-provider.js";
 import { createStoreRepository, restoreStore } from "./src/store-repository.js";
+import { createStorageUploadProvider } from "./src/storage-provider.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const adminDir = path.resolve(__dirname, "../admin");
 const mobileDir = path.resolve(__dirname, "../mobile");
+const mockUploads = new Map();
+const storageUploadProvider = createStorageUploadProvider();
+const asyncIdempotencyInFlight = new Map();
+const orderPaymentLocks = new Map();
+let mutationLockTail = Promise.resolve();
 assertProductionConfiguration();
 const storeRepository = createStoreRepository();
 const store = await storeRepository.load(createSeedStore());
@@ -48,9 +62,13 @@ if (storeNeedsSave || productionStoreChanged) {
   await storeRepository.save(store);
 }
 const port = Number(process.env.PORT ?? 8080);
+if (process.env.NODE_ENV === "production" && !storageUploadProvider.enabled) {
+  console.warn("SUPABASE_STORAGE_BUCKET is not configured; production uploads will return storage_not_configured");
+}
 
 const server = http.createServer(async (req, res) => {
   let rollbackSnapshot = null;
+  let releaseMutationLock = null;
   try {
     setCors(req, res);
     if (req.method === "OPTIONS") {
@@ -63,10 +81,15 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/health") {
       sendJson(res, 200, {
         ok: true,
-        service: "yoga-booking-api",
+        service: "good-vibe-pilates-yoga-api",
         database: storeRepository.kind,
         time: new Date().toISOString()
       });
+      return;
+    }
+
+    if (url.pathname === "/payments/return" && req.method === "GET") {
+      servePaymentReturnBridge(res, url);
       return;
     }
 
@@ -80,12 +103,18 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (url.pathname.startsWith("/mock-upload/") || url.pathname.startsWith("/assets/")) {
+      await serveMockUpload(req, res, url);
+      return;
+    }
+
     if (!url.pathname.startsWith("/api/v1")) {
       sendJson(res, 404, { error: "not_found" });
       return;
     }
 
     if (storeRepository.enabled && isMutation(req.method)) {
+      releaseMutationLock = await acquireMutationLock();
       rollbackSnapshot = structuredClone(store);
       res.yomiDeferJson = true;
     }
@@ -102,6 +131,7 @@ const server = http.createServer(async (req, res) => {
     const body = await readJson(req);
     const isLogoutRequest = req.method === "POST" && url.pathname === "/api/v1/auth/logout";
     const auth = optionalAuth(req, { ignoreInvalid: isLogoutRequest });
+    req.goodVibeAuth = auth;
     await routeApi(req, res, url, body, auth);
     await persistAndFlush(res);
   } catch (error) {
@@ -113,14 +143,16 @@ const server = http.createServer(async (req, res) => {
       sendJson(res, status, {
         error: error.code ?? "internal_error",
         message: error.message,
-        details: error.stripe
+        details: error.details ?? error.stripe
       });
     }
+  } finally {
+    releaseMutationLock?.();
   }
 });
 
 server.listen(port, () => {
-  console.log(`Yoga booking API listening on http://localhost:${port}`);
+  console.log(`Good Vibe Pilates & Yoga API listening on http://localhost:${port}`);
   console.log(`Admin UI: http://localhost:${port}/admin`);
   console.log(`Database: ${storeRepository.kind}`);
 });
@@ -196,6 +228,7 @@ async function routeApi(req, res, url, body, auth) {
       .filter((session) => !coachId || session.coachId === coachId)
       .filter((session) => !courseId || session.courseId === courseId)
       .filter((session) => session.status === "open")
+      .filter((session) => new Date(session.startsAt).getTime() > Date.now())
       .map((session) => ({
         ...session,
         remainingCapacity: session.capacity - session.bookedCount,
@@ -233,6 +266,12 @@ async function routeApi(req, res, url, body, auth) {
     if (auth.activeRole === ROLES.STUDENT && booking.userId !== auth.userId) {
       throw problem(403, "forbidden", "Cannot access another user's booking");
     }
+    if (auth.activeRole === ROLES.COACH) {
+      const coach = store.coaches.find((item) => item.userId === auth.userId);
+      if (!coach || booking.coachId !== coach.id) {
+        throw problem(403, "coach_booking_forbidden", "Coaches can only access bookings for their own sessions");
+      }
+    }
     sendJson(res, 200, enrichBookings([booking], locale)[0]);
     return;
   }
@@ -257,14 +296,16 @@ async function routeApi(req, res, url, body, auth) {
 
   if (method === "GET" && pathName === "/member-cards") {
     requireAuth(auth);
+    requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
     let cards = store.memberCards;
     if (auth.activeRole === ROLES.STUDENT) cards = cards.filter((card) => card.userId === auth.userId);
-    sendJson(res, 200, cards);
+    sendJson(res, 200, cards.map((card) => normalizeMemberCardStatus(card)));
     return;
   }
 
   if (method === "GET" && segments[0] === "member-cards" && segments[2] === "transactions") {
     requireAuth(auth);
+    requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
     const card = store.memberCards.find((item) => item.id === segments[1]);
     if (!card) throw problem(404, "member_card_not_found", "Member card not found");
     if (auth.activeRole === ROLES.STUDENT && card.userId !== auth.userId) {
@@ -293,6 +334,7 @@ async function routeApi(req, res, url, body, auth) {
 
   if (method === "GET" && pathName === "/orders") {
     requireAuth(auth);
+    requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
     let orders = store.orders;
     if (auth.activeRole === ROLES.STUDENT) orders = orders.filter((order) => order.userId === auth.userId);
     sendJson(res, 200, orders.map(enrichOrder));
@@ -301,6 +343,7 @@ async function routeApi(req, res, url, body, auth) {
 
   if (method === "GET" && segments[0] === "orders" && segments[1]) {
     requireAuth(auth);
+    requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
     const order = store.orders.find((item) => item.id === segments[1]);
     if (!order) throw problem(404, "order_not_found", "Order not found");
     if (auth.activeRole === ROLES.STUDENT && order.userId !== auth.userId) {
@@ -321,109 +364,127 @@ async function routeApi(req, res, url, body, auth) {
 
   if (method === "POST" && pathName === "/payments/stripe/payment-intents") {
     requireAuth(auth);
-    const order = body.orderId ? store.orders.find((item) => item.id === body.orderId) : null;
-    const amount = body.amount ?? order?.totalAmount;
-    const currency = body.currency ?? order?.currency ?? "HKD";
-    const methodCode = body.methodCode ?? "card";
-    const user = store.users.find((item) => item.id === auth.userId);
-    const stripeResult = await createStripePaymentIntent({
-      amount,
-      currency,
-      methodCode,
-      orderId: body.orderId,
-      customerEmail: user?.email,
-      returnUrl: body.returnUrl ?? `${baseUrl()}/payments/return`
-    });
-    const payment = createPaymentRecord(store, auth, {
-      orderId: body.orderId,
-      amount,
-      currency,
-      country: body.country ?? "HK",
-      methodCode,
-      providerPayload: {
-        paymentIntentId: stripeResult.id ?? stripeResult.paymentIntentId
-      }
-    });
-    sendJson(res, 201, { payment, stripe: stripeResult });
+    await requireIdempotencyAsync(
+      req,
+      paymentIdempotencyScope("payment-intent", auth, body.orderId),
+      () => withOrderPaymentLock(body.orderId, async () => {
+        const paymentRequest = validatePaymentRequest(store, auth, body);
+        rejectExistingOrderPayment(paymentRequest, "payment-intent");
+        const user = store.users.find((item) => item.id === auth.userId);
+        const returnLocale = normalizePaymentReturnLocale(body.locale ?? user?.locale ?? auth.locale);
+        const stripeResult = await createStripePaymentIntent({
+          amount: paymentRequest.amount,
+          currency: paymentRequest.currency,
+          methodCode: paymentRequest.methodCode,
+          orderId: paymentRequest.orderId,
+          customerEmail: user?.email,
+          returnUrl: body.returnUrl ?? paymentReturnUrl("pending", returnLocale),
+          idempotencyKey: stripeCreationIdempotencyKey("payment-intent", auth, body.orderId, req.headers["idempotency-key"])
+        });
+        const payment = createPaymentRecord(store, auth, {
+          ...paymentRequest,
+          providerPayload: {
+            paymentIntentId: stripeResult.id ?? stripeResult.paymentIntentId,
+            mode: stripeResult.mode ?? "live"
+          }
+        });
+        return { payment, stripe: stripeResult };
+      }),
+      res,
+      201
+    );
     return;
   }
 
   if (method === "POST" && pathName === "/payments/stripe/payment-sheet") {
     requireAuth(auth);
-    const order = body.orderId ? store.orders.find((item) => item.id === body.orderId) : null;
-    const amount = body.amount ?? order?.totalAmount;
-    const currency = body.currency ?? order?.currency ?? "HKD";
-    const methodCode = body.methodCode ?? "card";
-    const user = store.users.find((item) => item.id === auth.userId);
-    const stripeResult = await createStripePaymentSheet({
-      amount,
-      currency,
-      methodCode,
-      orderId: body.orderId,
-      customerEmail: user?.email,
-      merchantIdentifier: body.merchantIdentifier
-    });
-    const payment = createPaymentRecord(store, auth, {
-      orderId: body.orderId,
-      amount,
-      currency,
-      country: body.country ?? "HK",
-      methodCode,
-      providerPayload: {
-        paymentIntentId: stripeResult.paymentIntentId
-      }
-    });
-    sendJson(res, 201, { payment, stripe: stripeResult });
+    await requireIdempotencyAsync(
+      req,
+      paymentIdempotencyScope("payment-sheet", auth, body.orderId),
+      () => withOrderPaymentLock(body.orderId, async () => {
+        const paymentRequest = validatePaymentRequest(store, auth, body);
+        rejectExistingOrderPayment(paymentRequest, "payment-sheet");
+        const user = store.users.find((item) => item.id === auth.userId);
+        const stripeResult = await createStripePaymentSheet({
+          amount: paymentRequest.amount,
+          currency: paymentRequest.currency,
+          methodCode: paymentRequest.methodCode,
+          orderId: paymentRequest.orderId,
+          customerEmail: user?.email,
+          merchantIdentifier: body.merchantIdentifier,
+          idempotencyKey: stripeCreationIdempotencyKey("payment-sheet", auth, body.orderId, req.headers["idempotency-key"])
+        });
+        const payment = createPaymentRecord(store, auth, {
+          ...paymentRequest,
+          providerPayload: {
+            paymentIntentId: stripeResult.paymentIntentId,
+            mode: stripeResult.mode ?? "live"
+          }
+        });
+        return { payment, stripe: stripeResult };
+      }),
+      res,
+      201
+    );
     return;
   }
 
   if (method === "POST" && pathName === "/payments/stripe/checkout-sessions") {
     requireAuth(auth);
-    const order = body.orderId ? store.orders.find((item) => item.id === body.orderId) : null;
-    const amount = body.amount ?? order?.totalAmount;
-    const currency = body.currency ?? order?.currency ?? "HKD";
-    const methodCode = body.methodCode ?? "card";
-    const stripeResult = await createStripeCheckoutSession({
-      amount,
-      currency,
-      methodCode,
-      orderId: body.orderId,
-      productName: body.productName ?? "Yoga booking",
-      successUrl: body.successUrl ?? `${baseUrl()}/admin?payment=success`,
-      cancelUrl: body.cancelUrl ?? `${baseUrl()}/admin?payment=cancel`
-    });
-    const payment = createPaymentRecord(store, auth, {
-      orderId: body.orderId,
-      amount,
-      currency,
-      country: body.country ?? "HK",
-      methodCode,
-      providerPayload: {
-        checkoutSessionId: stripeResult.id ?? stripeResult.checkoutSessionId
-      }
-    });
-    sendJson(res, 201, { payment, stripe: stripeResult });
+    await requireIdempotencyAsync(
+      req,
+      paymentIdempotencyScope("checkout", auth, body.orderId),
+      () => withOrderPaymentLock(body.orderId, async () => {
+        const paymentRequest = validatePaymentRequest(store, auth, body);
+        const existingResponse = reusableCheckoutResponse(paymentRequest);
+        if (existingResponse) return existingResponse;
+        rejectExistingOrderPayment(paymentRequest, "checkout");
+        const user = store.users.find((item) => item.id === auth.userId);
+        const returnLocale = normalizePaymentReturnLocale(body.locale ?? user?.locale ?? auth.locale);
+        const stripeResult = await createStripeCheckoutSession({
+          amount: paymentRequest.amount,
+          currency: paymentRequest.currency,
+          methodCode: paymentRequest.methodCode,
+          orderId: paymentRequest.orderId,
+          productName: body.productName ?? "Good Vibe Pilates & Yoga",
+          successUrl: paymentReturnUrl("success", returnLocale),
+          cancelUrl: paymentReturnUrl("cancel", returnLocale),
+          idempotencyKey: stripeCreationIdempotencyKey("checkout", auth, body.orderId, req.headers["idempotency-key"])
+        });
+        const checkoutExpiresAt = stripeResult.expiresAt
+          ?? (Number.isSafeInteger(stripeResult.expires_at)
+            ? new Date(stripeResult.expires_at * 1000).toISOString()
+            : null);
+        const payment = createPaymentRecord(store, auth, {
+          ...paymentRequest,
+          providerPayload: {
+            checkoutSessionId: stripeResult.id ?? stripeResult.checkoutSessionId,
+            checkoutUrl: stripeResult.url,
+            checkoutExpiresAt,
+            mode: stripeResult.mode ?? "live"
+          }
+        });
+        return { payment, stripe: stripeResult };
+      }),
+      res,
+      201
+    );
     return;
   }
 
   if (method === "POST" && segments[0] === "payments" && segments[2] === "refunds") {
     requireAuth(auth);
     requireRole(auth, [ROLES.STAFF, ROLES.ADMIN]);
-    const payment = store.payments.find((item) => item.id === segments[1]);
-    if (!payment) throw problem(404, "payment_not_found", "Payment not found");
-    const refund = {
-      id: `ref_${Date.now()}`,
-      paymentId: payment.id,
-      amount: body.amount ?? payment.amount,
-      currency: payment.currency,
-      status: "succeeded",
-      reason: body.reason ?? "requested_by_customer",
-      createdAt: new Date().toISOString()
-    };
-    payment.status = PAYMENT_STATUS.REFUNDED;
-    payment.refundStatus = "refunded";
-    store.refunds.push(refund);
-    sendJson(res, 201, { refund, payment });
+    await requireIdempotencyAsync(
+      req,
+      `payments.refunds.${segments[1]}`,
+      () => withOrderPaymentLock(
+        `refund:${segments[1]}`,
+        () => performRefund(segments[1], body, auth, req.headers["idempotency-key"])
+      ),
+      res,
+      201
+    );
     return;
   }
 
@@ -437,7 +498,7 @@ async function routeApi(req, res, url, body, auth) {
   if (segments[0] === "admin") {
     requireAuth(auth);
     requireRole(auth, [ROLES.ADMIN]);
-    routeAdmin(req, res, segments.slice(1), body);
+    await routeAdmin(req, res, segments.slice(1), body, auth);
     return;
   }
 
@@ -483,7 +544,7 @@ function routeStaff(req, res, pathName, url, body, locale) {
   throw problem(404, "staff_route_not_found", "Staff route not found");
 }
 
-function routeAdmin(req, res, segments, body) {
+async function routeAdmin(req, res, segments, body, adminAuth) {
   const resource = segments[0];
   const idValue = segments[1];
   const subresource = segments[2];
@@ -508,53 +569,57 @@ function routeAdmin(req, res, segments, body) {
     requireAdminIdempotency(req, "admin.members.patch", () => {
       const user = store.users.find((item) => item.id === idValue);
       if (!user) throw problem(404, "member_not_found", "Member not found");
-      Object.assign(user, allowed(body, ["name", "email", "phone", "locale", "roles"]), { updatedAt: new Date().toISOString() });
-      audit(store, currentAdminAuth(req), "admin.member.update", user.id, body);
+      const updates = allowed(body, ["name", "email", "phone", "locale", "roles"]);
+      if (Object.hasOwn(updates, "roles")) {
+        updates.roles = normalizeRoles(updates.roles);
+        ensureAdminRoleRemovalAllowed(user, updates.roles);
+      }
+      if (Object.hasOwn(updates, "email")) {
+        const email = normalizeIdentity(updates.email);
+        if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+          throw problem(400, "invalid_email", "email must be a valid address");
+        }
+        const duplicateIdentity = store.authIdentities.find((identity) => (
+          identity.type === "email" && identity.value === email && identity.userId !== user.id
+        ));
+        if (duplicateIdentity) throw problem(409, "email_already_in_use", "Email is already in use");
+        const identities = store.authIdentities.filter((identity) => identity.type === "email" && identity.userId === user.id);
+        if (!identities.length) {
+          throw problem(409, "login_identity_missing", "Member has no email login identity to update");
+        }
+        for (const identity of identities) identity.value = email;
+        updates.email = email;
+      }
+      Object.assign(user, updates, { updatedAt: new Date().toISOString() });
+      if (Object.hasOwn(updates, "roles")) revokeInvalidRoleSessions(user.id, user.roles);
+      audit(store, adminAuth, "admin.member.update", user.id, body);
       return user;
     }, res);
     return;
   }
 
   if (resource === "member-cards" && idValue && ["freeze", "extend", "transfer", "upgrade"].includes(subresource) && req.method === "POST") {
-    const auth = currentAdminAuth(req);
-    requireAdminIdempotency(req, `admin.member_cards.${subresource}`, () => memberCardOperation(store, auth, idValue, subresource, body), res);
+    requireAdminIdempotency(req, `admin.member_cards.${subresource}`, () => memberCardOperation(store, adminAuth, idValue, subresource, body), res);
     return;
   }
 
   if (resource === "payments" && idValue && subresource === "refunds" && req.method === "POST") {
-    requireAdminIdempotency(req, "admin.payments.refunds", () => {
-      const auth = currentAdminAuth(req);
-      const payment = store.payments.find((item) => item.id === idValue);
-      if (!payment) throw problem(404, "payment_not_found", "Payment not found");
-      const refund = {
-        id: id("ref"),
-        paymentId: payment.id,
-        amount: body.amount ?? payment.amount,
-        currency: payment.currency,
-        status: "succeeded",
-        reason: body.reason ?? "requested_by_admin",
-        providerRefundId: null,
-        createdAt: new Date().toISOString()
-      };
-      payment.status = "refunded";
-      payment.refundStatus = "refunded";
-      store.refunds.push(refund);
-      audit(store, auth, "admin.payment.refund", payment.id, { refundId: refund.id, amount: refund.amount });
-      return { refund, payment };
-    }, res);
+    await requireIdempotencyAsync(
+      req,
+      `admin.payments.refunds.${idValue}`,
+      () => withOrderPaymentLock(
+        `refund:${idValue}`,
+        () => performRefund(idValue, body, adminAuth, req.headers["idempotency-key"])
+      ),
+      res
+    );
     return;
   }
 
   if (resource === "uploads" && idValue === "presign" && req.method === "POST") {
-    requireAdminIdempotency(req, "admin.uploads.presign", () => {
-      const objectKey = `${body.scope ?? "admin"}/${Date.now()}-${sanitizeFileName(body.fileName ?? "upload.bin")}`;
-      const upload = {
-        objectKey,
-        uploadUrl: `${baseUrl()}/mock-upload/${encodeURIComponent(objectKey)}`,
-        publicUrl: `${baseUrl()}/assets/${encodeURIComponent(objectKey)}`,
-        expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
-      };
-      audit(store, currentAdminAuth(req), "admin.upload.presign", objectKey, upload);
+    await requireIdempotencyAsync(req, "admin.uploads.presign", async () => {
+      const upload = await createAdminUpload(body);
+      audit(store, adminAuth, "admin.upload.presign", upload.objectKey, upload);
       return upload;
     }, res);
     return;
@@ -569,19 +634,22 @@ function routeAdmin(req, res, segments, body) {
   if (!collection) throw problem(404, "admin_resource_not_found", "Admin resource not found");
 
   if (req.method === "GET" && !idValue) {
-    sendJson(res, 200, collection);
+    sendJson(res, 200, resource === "payments" ? collection.map(enrichAdminPayment) : collection);
     return;
   }
 
   if (req.method === "POST" && !idValue) {
     requireAdminIdempotency(req, `admin.${resource}.create`, () => {
-      const entity = {
+      const entity = normalizeAdminEntity(resource, {
         id: body.id ?? `${resource}_${Date.now()}`,
         ...body,
         createdAt: new Date().toISOString()
-      };
+      }, { isCreate: true });
+      if (collection.some((candidate) => candidate.id === entity.id)) {
+        throw problem(409, "duplicate_entity_id", "An entity with this id already exists");
+      }
       collection.push(entity);
-      audit(store, currentAdminAuth(req), `admin.${resource}.create`, entity.id, body);
+      audit(store, adminAuth, `admin.${resource}.create`, entity.id, body);
       return entity;
     }, res, 201);
     return;
@@ -591,18 +659,21 @@ function routeAdmin(req, res, segments, body) {
   if (index < 0) throw problem(404, "admin_entity_not_found", "Admin entity not found");
 
   if (req.method === "GET") {
-    sendJson(res, 200, collection[index]);
+    sendJson(res, 200, resource === "payments" ? enrichAdminPayment(collection[index]) : collection[index]);
     return;
   }
 
   if (req.method === "PATCH") {
     requireAdminIdempotency(req, `admin.${resource}.update`, () => {
-      collection[index] = {
+      const updated = normalizeAdminEntity(resource, {
         ...collection[index],
         ...body,
         updatedAt: new Date().toISOString()
-      };
-      audit(store, currentAdminAuth(req), `admin.${resource}.update`, collection[index].id, body);
+      });
+      if (resource === "users") ensureAdminRoleRemovalAllowed(collection[index], updated.roles);
+      collection[index] = updated;
+      if (resource === "users") revokeInvalidRoleSessions(collection[index].id, collection[index].roles);
+      audit(store, adminAuth, `admin.${resource}.update`, collection[index].id, body);
       return collection[index];
     }, res);
     return;
@@ -610,8 +681,10 @@ function routeAdmin(req, res, segments, body) {
 
   if (req.method === "DELETE") {
     requireAdminIdempotency(req, `admin.${resource}.delete`, () => {
+      if (resource === "users") ensureAdminRoleRemovalAllowed(collection[index], []);
       const [deleted] = collection.splice(index, 1);
-      audit(store, currentAdminAuth(req), `admin.${resource}.delete`, deleted.id, {});
+      if (resource === "users") revokeInvalidRoleSessions(deleted.id, []);
+      audit(store, adminAuth, `admin.${resource}.delete`, deleted.id, {});
       return deleted;
     }, res);
     return;
@@ -679,7 +752,8 @@ function enrichMember(user) {
 function requireAdminIdempotency(req, scope, handler, res, status = 200) {
   const key = req.headers["idempotency-key"];
   if (!key) throw problem(400, "missing_idempotency_key", "Idempotency-Key header is required");
-  const existing = store.idempotencyRecords.find((record) => record.key === key && record.scope === scope);
+  const actorScope = requestIdempotencyScope(req, scope);
+  const existing = store.idempotencyRecords.find((record) => record.key === key && record.scope === actorScope);
   if (existing) {
     sendJson(res, status, existing.response);
     return;
@@ -688,23 +762,198 @@ function requireAdminIdempotency(req, scope, handler, res, status = 200) {
   store.idempotencyRecords.push({
     id: id("idem"),
     key,
-    scope,
+    scope: actorScope,
     response,
     createdAt: new Date().toISOString()
   });
   sendJson(res, status, response);
 }
 
-function currentAdminAuth(req) {
-  return verifyToken(req.headers.authorization.match(/^Bearer\s+(.+)$/i)[1], store);
+function requestIdempotencyScope(req, scope) {
+  return `${scope}:actor:${req.goodVibeAuth?.userId ?? "anonymous"}`;
+}
+
+async function requireIdempotencyAsync(req, scope, handler, res, status = 200) {
+  const key = req.headers["idempotency-key"];
+  if (!key) throw problem(400, "missing_idempotency_key", "Idempotency-Key header is required");
+  const actorScope = requestIdempotencyScope(req, scope);
+  const existing = store.idempotencyRecords.find((record) => record.key === key && record.scope === actorScope);
+  if (existing) {
+    sendJson(res, status, existing.response);
+    return existing.response;
+  }
+  const inFlightKey = `${actorScope}::${key}`;
+  let operation = asyncIdempotencyInFlight.get(inFlightKey);
+  if (!operation) {
+    operation = (async () => {
+      const response = await handler();
+      store.idempotencyRecords.push({
+        id: id("idem"),
+        key,
+        scope: actorScope,
+        response,
+        createdAt: new Date().toISOString()
+      });
+      return response;
+    })();
+    asyncIdempotencyInFlight.set(inFlightKey, operation);
+  }
+  let response;
+  try {
+    response = await operation;
+  } finally {
+    if (asyncIdempotencyInFlight.get(inFlightKey) === operation) {
+      asyncIdempotencyInFlight.delete(inFlightKey);
+    }
+  }
+  sendJson(res, status, response);
+  return response;
+}
+
+async function performRefund(paymentId, body, auth, idempotencyKey) {
+  const prepared = prepareRefund(store, paymentId, body.amount);
+  const providerRefund = await createStripeRefund({
+    paymentIntentId: prepared.payment.stripePaymentIntentId,
+    chargeId: prepared.payment.stripeChargeId,
+    amount: prepared.amount,
+    reason: body.reason,
+    idempotencyKey: `good-vibe-refund:${paymentId}:${idempotencyKey}`.slice(0, 255)
+  });
+  const result = recordRefund(store, paymentId, {
+    amount: prepared.amount,
+    reason: body.reason,
+    providerRefundId: providerRefund.id,
+    status: providerRefund.status ?? "succeeded"
+  });
+  audit(store, auth, "payment.refund", paymentId, {
+    refundId: result.refund.id,
+    providerRefundId: result.refund.providerRefundId,
+    amount: result.refund.amount
+  });
+  return { ...result, stripe: providerRefund };
 }
 
 function allowed(source, keys) {
   return Object.fromEntries(Object.entries(source).filter(([key]) => keys.includes(key)));
 }
 
+function normalizeAdminEntity(resource, source, { isCreate = false } = {}) {
+  const entity = { ...source };
+  if (resource === "users") entity.roles = normalizeRoles(entity.roles);
+  if (resource === "course-sessions" && isCreate && entity.bookedCount === undefined) {
+    entity.bookedCount = 0;
+  }
+  const positiveFields = {
+    courses: ["durationMinutes", "priceAmount", "capacity", "memberCardDeductCount"],
+    "course-sessions": ["capacity"],
+    "membership-plans": ["totalCredits", "priceAmount", "validityDays"],
+    "member-cards": ["totalCredits"],
+    products: ["priceAmount"]
+  }[resource] ?? [];
+  const nonNegativeFields = {
+    "course-sessions": ["bookedCount"],
+    "member-cards": ["remainingCredits"],
+    products: ["stock"]
+  }[resource] ?? [];
+
+  for (const field of positiveFields) {
+    if (entity[field] === undefined) continue;
+    entity[field] = requireAdminInteger(entity[field], field, { allowZero: false });
+  }
+  for (const field of nonNegativeFields) {
+    if (entity[field] === undefined) continue;
+    entity[field] = requireAdminInteger(entity[field], field, { allowZero: true });
+  }
+  if (resource === "course-sessions" && entity.capacity !== undefined && entity.bookedCount > entity.capacity) {
+    throw problem(400, "invalid_booked_count", "bookedCount cannot exceed capacity");
+  }
+  if (resource === "member-cards" && entity.totalCredits !== undefined && entity.remainingCredits > entity.totalCredits) {
+    throw problem(400, "invalid_card_credits", "remainingCredits cannot exceed totalCredits");
+  }
+  if (resource === "coaches") {
+    const user = byIdRequired(store.users, entity.userId, "user_not_found");
+    if (!user.roles?.includes(ROLES.COACH)) {
+      throw problem(409, "coach_role_required", "Coach profile user must have the coach role");
+    }
+  }
+  if (resource === "course-sessions") {
+    byIdRequired(store.courses, entity.courseId, "course_not_found");
+    byIdRequired(store.coaches, entity.coachId, "coach_not_found");
+    const startsAt = new Date(entity.startsAt).getTime();
+    const endsAt = new Date(entity.endsAt).getTime();
+    if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
+      throw problem(400, "invalid_session_time", "endsAt must be later than startsAt");
+    }
+    if (isCreate && startsAt <= Date.now()) {
+      throw problem(409, "session_started", "New course sessions must start in the future");
+    }
+  }
+  if (resource === "member-cards") {
+    byIdRequired(store.users, entity.userId, "user_not_found");
+    if (entity.planId) byIdRequired(store.membershipPlans, entity.planId, "membership_plan_not_found");
+  }
+  return entity;
+}
+
+function normalizeRoles(value) {
+  const allowedRoles = new Set(Object.values(ROLES));
+  if (!Array.isArray(value) || value.length === 0 || value.some((role) => !allowedRoles.has(role))) {
+    throw problem(400, "invalid_roles", "roles must be a non-empty array containing only student, coach, staff, or admin");
+  }
+  return [...new Set(value)];
+}
+
+function ensureAdminRoleRemovalAllowed(user, nextRoles) {
+  if (!user.roles?.includes(ROLES.ADMIN) || nextRoles.includes(ROLES.ADMIN)) return;
+  const adminCount = store.users.filter((candidate) => (
+    candidate.roles?.includes(ROLES.ADMIN)
+    && store.authIdentities.some((identity) => identity.userId === candidate.id)
+  )).length;
+  if (adminCount <= 1) {
+    throw problem(409, "last_admin_required", "The last admin role cannot be removed");
+  }
+}
+
+function revokeInvalidRoleSessions(userId, validRoles) {
+  const revokedAt = new Date().toISOString();
+  for (const session of store.roleSessions) {
+    if (session.userId === userId && !session.revokedAt && !validRoles.includes(session.activeRole)) {
+      session.revokedAt = revokedAt;
+    }
+  }
+}
+
+function requireAdminInteger(value, field, { allowZero }) {
+  const number = typeof value === "number" ? value : Number(value);
+  if (!Number.isSafeInteger(number) || number < (allowZero ? 0 : 1)) {
+    throw problem(400, `invalid_${field.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)}`, `${field} must be ${allowZero ? "a non-negative" : "a positive"} integer`);
+  }
+  return number;
+}
+
 function sanitizeFileName(value) {
   return String(value).replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+async function createAdminUpload(body) {
+  const scope = sanitizeFileName(body.scope ?? "admin").replace(/^\.+$/, "admin") || "admin";
+  const objectKey = `${scope}/${Date.now()}-${sanitizeFileName(body.fileName ?? "upload.bin")}`;
+  if (storageUploadProvider.enabled || storageUploadProvider.kind === "misconfigured") {
+    return storageUploadProvider.createSignedUpload({ objectKey });
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw problem(503, "storage_not_configured", "SUPABASE_STORAGE_BUCKET must be configured for production uploads");
+  }
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+  const upload = {
+    storage: "memory",
+    objectKey,
+    uploadUrl: `${baseUrl()}/mock-upload/${encodeURIComponent(objectKey)}`,
+    publicUrl: `${baseUrl()}/assets/${encodeURIComponent(objectKey)}`,
+    expiresAt: expiresAt.toISOString()
+  };
+  mockUploads.set(objectKey, { body: null, contentType: "application/octet-stream", expiresAt: expiresAt.getTime() });
+  return upload;
 }
 
 function enrichBookings(bookings, locale) {
@@ -761,6 +1010,143 @@ function enrichOrder(order) {
   };
 }
 
+function enrichAdminPayment(payment) {
+  const { stripeCheckoutUrl: _checkoutCapabilityUrl, ...safePayment } = payment;
+  const paymentRefunds = store.refunds.filter((refund) => refund.paymentId === payment.id);
+  const locallyRefundedAmount = paymentRefunds
+    .filter((refund) => refund.status === "succeeded")
+    .reduce((sum, refund) => sum + refund.amount, 0);
+  const locallyCommittedAmount = paymentRefunds
+    .filter((refund) => !["failed", "canceled"].includes(refund.status))
+    .reduce((sum, refund) => sum + refund.amount, 0);
+  const providerRefundedAmount = Number.isSafeInteger(payment.stripeAmountRefunded)
+    ? payment.stripeAmountRefunded
+    : 0;
+  const terminalRefundedAmount = payment.status === "refunded" || payment.refundStatus === "refunded"
+    ? payment.amount
+    : 0;
+  const refundedAmount = Math.min(
+    payment.amount,
+    Math.max(locallyRefundedAmount, providerRefundedAmount, terminalRefundedAmount)
+  );
+  const committedAmount = Math.min(payment.amount, Math.max(locallyCommittedAmount, providerRefundedAmount));
+  const refundableAmount = payment.status === "succeeded"
+    ? Math.max(0, payment.amount - committedAmount)
+    : 0;
+  return {
+    ...safePayment,
+    refundedAmount,
+    refundableAmount
+  };
+}
+
+function paymentIdempotencyScope(flow, auth, orderId) {
+  return `payments.create.${flow}.${auth.userId}.${orderId ?? "standalone"}`;
+}
+
+function stripeCreationIdempotencyKey(flow, auth, orderId, clientKey) {
+  const digest = crypto
+    .createHash("sha256")
+    .update(`${flow}:${auth.userId}:${orderId ?? "standalone"}:${clientKey}`)
+    .digest("hex");
+  return `good-vibe-${flow}-${digest}`;
+}
+
+async function acquireMutationLock() {
+  const previous = mutationLockTail;
+  let release;
+  mutationLockTail = new Promise((resolve) => {
+    release = resolve;
+  });
+  await previous.catch(() => {});
+  return () => release();
+}
+
+async function withOrderPaymentLock(orderId, handler) {
+  if (!orderId) return handler();
+  const previous = orderPaymentLocks.get(orderId) ?? Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+  orderPaymentLocks.set(orderId, current);
+  await previous.catch(() => {});
+  try {
+    return await handler();
+  } finally {
+    release();
+    if (orderPaymentLocks.get(orderId) === current) orderPaymentLocks.delete(orderId);
+  }
+}
+
+function reusableCheckoutResponse(paymentRequest) {
+  const existing = activeOrderPayment(paymentRequest.orderId);
+  if (!existing) return null;
+  if (
+    existing.paymentMethodCode !== paymentRequest.methodCode
+    || !existing.stripeCheckoutSessionId
+    || !existing.stripeCheckoutUrl
+  ) {
+    return null;
+  }
+  const expiresAt = existing.stripeCheckoutExpiresAt
+    ? new Date(existing.stripeCheckoutExpiresAt).getTime()
+    : new Date(existing.createdAt).getTime() + 24 * 60 * 60 * 1000;
+  if (Number.isFinite(expiresAt) && expiresAt <= Date.now()) {
+    existing.status = "failed";
+    releasePendingOrderResources(store, existing.orderId, "payment_expired");
+    return null;
+  }
+  return {
+    payment: existing,
+    stripe: {
+      mode: existing.stripeMode ?? "live",
+      id: existing.stripeCheckoutSessionId,
+      checkoutSessionId: existing.stripeCheckoutSessionId,
+      url: existing.stripeCheckoutUrl,
+      expiresAt: existing.stripeCheckoutExpiresAt,
+      reused: true
+    }
+  };
+}
+
+function rejectExistingOrderPayment(paymentRequest, requestedFlow) {
+  const existing = activeOrderPayment(paymentRequest.orderId);
+  if (!existing) return;
+  const error = problem(409, "order_payment_in_progress", "This order already has an active payment attempt");
+  error.details = {
+    paymentId: existing.id,
+    paymentStatus: existing.status,
+    requestedFlow,
+    recovery: existing.stripeCheckoutUrl ? "reuse_checkout" : "wait_or_retry_after_failure"
+  };
+  throw error;
+}
+
+function activeOrderPayment(orderId) {
+  if (!orderId) return null;
+  const candidates = store.payments.filter((payment) => payment.orderId === orderId);
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const payment = candidates[index];
+    if (payment.status === "failed") continue;
+    if (isExpiredCheckoutPayment(payment)) {
+      payment.status = "failed";
+      releasePendingOrderResources(store, payment.orderId, "payment_expired");
+      continue;
+    }
+    return payment;
+  }
+  return null;
+}
+
+function isExpiredCheckoutPayment(payment) {
+  if (!payment.stripeCheckoutSessionId) return false;
+  const expiresAt = payment.stripeCheckoutExpiresAt
+    ? new Date(payment.stripeCheckoutExpiresAt).getTime()
+    : new Date(payment.createdAt).getTime() + 24 * 60 * 60 * 1000;
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
 function requireAuth(auth) {
   if (!auth) throw problem(401, "unauthorized", "Authentication is required");
 }
@@ -782,7 +1168,11 @@ async function readJson(req) {
   if (!["POST", "PATCH", "PUT"].includes(req.method)) return {};
   const raw = await readRawBody(req);
   if (!raw) return {};
-  return JSON.parse(raw);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw problem(400, "invalid_json", "Request body must be valid JSON");
+  }
 }
 
 function readRawBody(req) {
@@ -800,15 +1190,70 @@ function readRawBody(req) {
   });
 }
 
+function readBinaryBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > 10_000_000) {
+        reject(problem(413, "payload_too_large", "Upload exceeds 10 MB"));
+        req.destroy();
+        return;
+      }
+      chunks.push(buffer);
+    });
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
+async function serveMockUpload(req, res, url) {
+  const isUploadUrl = url.pathname.startsWith("/mock-upload/");
+  const prefix = isUploadUrl ? "/mock-upload/" : "/assets/";
+  let objectKey;
+  try {
+    objectKey = decodeURIComponent(url.pathname.slice(prefix.length));
+  } catch {
+    throw problem(400, "invalid_upload_key", "Upload key is invalid");
+  }
+  const upload = mockUploads.get(objectKey);
+  if (!upload) throw problem(404, "upload_not_found", "Upload URL was not found");
+  if (upload.expiresAt <= Date.now() && upload.body === null) {
+    mockUploads.delete(objectKey);
+    throw problem(410, "upload_url_expired", "Upload URL has expired");
+  }
+
+  if (isUploadUrl && req.method === "PUT") {
+    upload.body = await readBinaryBody(req);
+    upload.contentType = req.headers["content-type"] || "application/octet-stream";
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  if (!isUploadUrl && req.method === "GET") {
+    if (upload.body === null) throw problem(404, "upload_not_ready", "File has not been uploaded yet");
+    res.writeHead(200, {
+      "Content-Type": upload.contentType,
+      "Content-Length": upload.body.length,
+      "Cache-Control": "public, max-age=3600"
+    });
+    res.end(upload.body);
+    return;
+  }
+  throw problem(405, "method_not_allowed", "Method not allowed");
+}
+
 async function serveAdmin(req, res, url) {
-  let filePath = url.pathname === "/" || url.pathname === "/admin"
+  let filePath = url.pathname === "/" || url.pathname === "/admin" || url.pathname === "/admin/"
     ? path.join(adminDir, "index.html")
     : path.join(adminDir, url.pathname.replace("/admin/", ""));
   if (!isInsideDirectory(adminDir, filePath)) {
     sendJson(res, 403, { error: "forbidden" });
     return;
   }
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     sendJson(res, 404, { error: "asset_not_found" });
     return;
   }
@@ -818,13 +1263,15 @@ async function serveAdmin(req, res, url) {
 }
 
 async function serveStatic(req, res, url, rootDir, prefix, indexName) {
-  const relativePath = url.pathname === prefix ? indexName : url.pathname.replace(`${prefix}/`, "");
+  const relativePath = url.pathname === prefix || url.pathname === `${prefix}/`
+    ? indexName
+    : url.pathname.replace(`${prefix}/`, "");
   const filePath = path.join(rootDir, relativePath);
   if (!isInsideDirectory(rootDir, filePath)) {
     sendJson(res, 403, { error: "forbidden" });
     return;
   }
-  if (!fs.existsSync(filePath)) {
+  if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
     sendJson(res, 404, { error: "asset_not_found" });
     return;
   }
@@ -851,6 +1298,126 @@ function sendJson(res, status, payload) {
     return;
   }
   writeJson(res, status, payload);
+}
+
+function servePaymentReturnBridge(res, url) {
+  const requestedStatus = url.searchParams.get("status");
+  const status = ["success", "cancel", "pending"].includes(requestedStatus)
+    ? requestedStatus
+    : "pending";
+  const locale = normalizePaymentReturnLocale(url.searchParams.get("locale"));
+  const copy = paymentReturnCopy(locale)[status];
+  const deepLink = new URL("yomiyoga://payment-return");
+  deepLink.searchParams.set("status", status);
+  deepLink.searchParams.set("locale", locale);
+  const sessionId = url.searchParams.get("session_id");
+  if (sessionId && sessionId.length <= 255) deepLink.searchParams.set("session_id", sessionId);
+  const deepLinkUrl = deepLink.toString();
+  const deepLinkHref = escapeHtmlAttribute(deepLinkUrl);
+  const nonce = crypto.randomBytes(16).toString("base64");
+  const html = `<!doctype html>
+<html lang="${locale}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>${copy.title} · Good Vibe Pilates &amp; Yoga</title>
+    <style>
+      :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; background: #f5f0e9; color: #2e2925; }
+      main { width: min(28rem, calc(100% - 3rem)); padding: 2rem; border-radius: 1.5rem; background: #fff; box-shadow: 0 1rem 3rem #392b1c1f; text-align: center; }
+      h1 { margin: 0 0 .75rem; font-family: Georgia, serif; font-weight: 500; }
+      p { margin: 0 0 1.5rem; line-height: 1.6; color: #625a53; }
+      a { display: inline-block; padding: .85rem 1.25rem; border-radius: 999px; background: #8f332d; color: #fff; font-weight: 700; text-decoration: none; }
+      @media (prefers-color-scheme: dark) { body { background: #171412; color: #f8f2ea; } main { background: #25211e; } p { color: #cfc3b8; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${copy.title}</h1>
+      <p>${copy.message}</p>
+      <a href="${deepLinkHref}">${copy.button}</a>
+    </main>
+    <script nonce="${nonce}">window.setTimeout(function () { window.location.replace(${JSON.stringify(deepLinkUrl)}); }, 50);</script>
+  </body>
+</html>`;
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+    "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff"
+  });
+  res.end(html);
+}
+
+function normalizePaymentReturnLocale(value) {
+  return ["en", "zh-Hans", "ko"].includes(value) ? value : "en";
+}
+
+function paymentReturnCopy(locale) {
+  const copy = {
+    en: {
+      success: {
+        title: "Returning to Good Vibe",
+        message: "Your payment was submitted. The app will refresh its confirmed status from our server.",
+        button: "Open Good Vibe app"
+      },
+      cancel: {
+        title: "Payment not completed",
+        message: "No payment confirmation was received. You can return to the app and try again.",
+        button: "Return to Good Vibe"
+      },
+      pending: {
+        title: "Checking payment status",
+        message: "Open the app to check the latest payment status from our server.",
+        button: "Open Good Vibe app"
+      }
+    },
+    "zh-Hans": {
+      success: {
+        title: "正在返回 Good Vibe",
+        message: "付款已提交。应用将从服务器刷新最终确认状态。",
+        button: "打开 Good Vibe 应用"
+      },
+      cancel: {
+        title: "付款未完成",
+        message: "尚未收到付款确认。您可以返回应用后重试。",
+        button: "返回 Good Vibe"
+      },
+      pending: {
+        title: "正在确认付款状态",
+        message: "请打开应用，从服务器获取最新付款状态。",
+        button: "打开 Good Vibe 应用"
+      }
+    },
+    ko: {
+      success: {
+        title: "Good Vibe로 돌아가는 중",
+        message: "결제가 제출되었습니다. 앱에서 서버의 최종 확인 상태를 새로고침합니다.",
+        button: "Good Vibe 앱 열기"
+      },
+      cancel: {
+        title: "결제가 완료되지 않았습니다",
+        message: "결제 확인을 받지 못했습니다. 앱으로 돌아가 다시 시도할 수 있습니다.",
+        button: "Good Vibe로 돌아가기"
+      },
+      pending: {
+        title: "결제 상태 확인 중",
+        message: "앱을 열어 서버의 최신 결제 상태를 확인하세요.",
+        button: "Good Vibe 앱 열기"
+      }
+    }
+  };
+  return copy[locale];
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
 }
 
 function writeJson(res, status, payload) {
@@ -886,7 +1453,7 @@ function setCors(req, res) {
     res.setHeader("Access-Control-Allow-Origin", requestOrigin);
     res.setHeader("Vary", "Origin");
   }
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization,Idempotency-Key,Stripe-Signature");
 }
 
@@ -894,6 +1461,13 @@ function baseUrl() {
   return process.env.APP_BASE_URL
     ?? process.env.RENDER_EXTERNAL_URL
     ?? `http://localhost:${port}`;
+}
+
+function paymentReturnUrl(status, locale = "en") {
+  const url = new URL("/payments/return", `${baseUrl().replace(/\/+$/, "")}/`);
+  url.searchParams.set("status", status);
+  url.searchParams.set("locale", normalizePaymentReturnLocale(locale));
+  return url.toString();
 }
 
 function isInsideDirectory(rootDir, candidate) {

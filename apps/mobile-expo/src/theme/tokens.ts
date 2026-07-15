@@ -1,29 +1,61 @@
-import { DynamicColorIOS, Platform } from "react-native";
-
-function adaptive(light: string, dark: string) {
-  return Platform.OS === "ios" ? DynamicColorIOS({ light, dark }) : light;
-}
-
-export const colors = {
-  background: adaptive("#F7F6F2", "#101412"),
-  surface: adaptive("#FFFFFF", "#181D1A"),
-  surfaceMuted: adaptive("#EEF2EE", "#202722"),
-  text: adaptive("#171B19", "#F4F6F4"),
-  muted: adaptive("#6B746F", "#A7B0AA"),
-  line: adaptive("#DDE2DD", "#303A34"),
-  accent: adaptive("#6F8877", "#90A996"),
-  accentDark: adaptive("#334C3D", "#3F5B49"),
-  accentSoft: adaptive("#E4ECE5", "#233128"),
-  coral: adaptive("#E85D4A", "#FF7867"),
-  coralSoft: adaptive("#FBE8E4", "#382522"),
-  blue: adaptive("#3B657A", "#76A9C0"),
-  blueSoft: adaptive("#E5EEF2", "#213139"),
-  danger: adaptive("#B33B33", "#FF8178"),
-  warning: adaptive("#A26924", "#E5AF62"),
-  success: adaptive("#39775A", "#75BF94"),
+export const lightColors = {
+  background: "#F7F6F2",
+  surface: "#FFFFFF",
+  surfaceMuted: "#EEF2EE",
+  text: "#171B19",
+  muted: "#6B746F",
+  line: "#DDE2DD",
+  accent: "#6F8877",
+  accentDark: "#334C3D",
+  accentSoft: "#E4ECE5",
+  coral: "#E85D4A",
+  coralSoft: "#FBE8E4",
+  blue: "#3B657A",
+  blueSoft: "#E5EEF2",
+  danger: "#B33B33",
+  warning: "#A26924",
+  success: "#39775A",
+  onDarkSubtle: "#AAB8AF",
+  onDarkMuted: "#C8CECA",
+  onAccentMuted: "#C5D0C9",
+  scannerMuted: "#C7D2CB",
+  progressTrack: "#3A403D",
   white: "#FFFFFF",
-  black: adaptive("#171B19", "#28322C")
+  black: "#171B19"
+} as const;
+
+export type ThemeColors = { [Key in keyof typeof lightColors]: string };
+
+export const darkColors: ThemeColors = {
+  background: "#101412",
+  surface: "#181D1A",
+  surfaceMuted: "#202722",
+  text: "#F4F6F4",
+  muted: "#A7B0AA",
+  line: "#303A34",
+  accent: "#90A996",
+  accentDark: "#3F5B49",
+  accentSoft: "#233128",
+  coral: "#FF7867",
+  coralSoft: "#382522",
+  blue: "#76A9C0",
+  blueSoft: "#213139",
+  danger: "#FF8178",
+  warning: "#E5AF62",
+  success: "#75BF94",
+  onDarkSubtle: "#BDCBC2",
+  onDarkMuted: "#D7E0DA",
+  onAccentMuted: "#D5E0D9",
+  scannerMuted: "#D5E0D9",
+  progressTrack: "#4A564F",
+  white: "#FFFFFF",
+  black: "#28322C"
 };
+
+export const themePalettes = {
+  light: lightColors,
+  dark: darkColors
+} as const;
 
 export const spacing = {
   xs: 4,

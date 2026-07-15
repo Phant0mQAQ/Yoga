@@ -82,6 +82,8 @@ export type Booking = {
   courseId: string;
   courseSessionId: string;
   coachId: string;
+  orderId?: string | null;
+  memberCardId?: string | null;
   status: "pending_payment" | "confirmed" | "cancelled" | "checked_in";
   startsAt: string;
   endsAt: string;
@@ -121,6 +123,8 @@ export type Payment = {
   country: string;
   status: string;
   refundStatus: string;
+  refundedAmount?: number;
+  refundableAmount?: number;
 };
 
 export type PaymentMethod = {
@@ -153,4 +157,13 @@ export type AuditLog = {
   entityId: string;
   metadata: unknown;
   createdAt: string;
+};
+
+export type PresignedUpload = {
+  storage: "supabase" | "memory";
+  objectKey: string;
+  uploadUrl: string;
+  publicUrl: string;
+  expiresAt: string;
+  headers?: Record<string, string>;
 };

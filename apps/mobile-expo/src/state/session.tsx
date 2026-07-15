@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
+  isUnauthorizedError,
   login as loginRequest,
   logout as logoutRequest,
   me,
@@ -18,6 +19,8 @@ type SessionState = {
   role: Role | null;
   locale: string;
   ready: boolean;
+  hydrationError: string | null;
+  retryHydration: () => Promise<void>;
   setLocale: (locale: string) => Promise<void>;
   login: (email: string, password: string, role: Role) => Promise<void>;
   logout: () => Promise<void>;
@@ -32,6 +35,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [role, setRole] = useState<Role | null>(null);
   const [locale, setLocaleState] = useState("en");
   const [ready, setReady] = useState(false);
+  const [hydrationError, setHydrationError] = useState<string | null>(null);
   const clearingSession = useRef<Promise<void> | null>(null);
 
   const clearLocalSession = useCallback(() => {
@@ -41,6 +45,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     setRole(null);
+    setHydrationError(null);
 
     clearingSession.current = (async () => {
       try {
@@ -70,26 +75,34 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [clearLocalSession]);
 
   async function hydrate() {
+    setReady(false);
+    setHydrationError(null);
     try {
       const storedToken = await SecureStore.getItemAsync("token");
+      if (storedToken) {
+        setAuthToken(storedToken);
+        setToken(storedToken);
+      }
       const storedLocale = await SecureStore.getItemAsync("locale");
       if (storedLocale) {
         setLocaleState(storedLocale);
         await i18n.changeLanguage(storedLocale);
       }
       if (storedToken) {
-        setAuthToken(storedToken);
         try {
           const response = await me();
-          setToken(storedToken);
           setUser(response.user);
           setRole(response.activeRole);
-        } catch {
-          await clearLocalSession();
+        } catch (error) {
+          if (isUnauthorizedError(error)) {
+            await clearLocalSession();
+          } else {
+            setHydrationError(errorMessage(error));
+          }
         }
       }
-    } catch {
-      await clearLocalSession();
+    } catch (error) {
+      setHydrationError(errorMessage(error));
     } finally {
       setReady(true);
     }
@@ -102,6 +115,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setToken(response.token);
     setUser(response.user);
     setRole(response.session.activeRole);
+    setHydrationError(null);
     try {
       await SecureStore.setItemAsync("token", response.token);
     } catch {
@@ -133,12 +147,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     role,
     locale,
     ready,
+    hydrationError,
+    retryHydration: hydrate,
     setLocale,
     login,
     logout
-  }), [token, user, role, locale, ready]);
+  }), [token, user, role, locale, ready, hydrationError]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unable to restore your session.";
 }
 
 export function useSession() {

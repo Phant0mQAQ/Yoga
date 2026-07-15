@@ -61,7 +61,7 @@ button { cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 11px; padding: 0 8px 30px; }
 .brand img { width: 42px; height: 42px; border-radius: 9px; }
 .brand strong, .brand span { display: block; }
-.brand strong { font-size: 16px; }
+.brand strong { font-size: 14px; line-height: 1.2; }
 .brand span { margin-top: 2px; color: #9eaaa3; font-size: 11px; }
 
 .side-nav { display: grid; gap: 4px; }
@@ -109,12 +109,13 @@ button.danger { border-color: var(--coral-soft); background: var(--coral-soft); 
 button.compact { min-height: 34px; padding: 5px 10px; font-size: 11px; }
 button:disabled { cursor: not-allowed; opacity: .5; }
 button:hover { opacity: .78; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
 .icon-action { width: 42px; padding: 0; font-size: 19px; }
 .logout-action { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 
 .login-view { min-height: 430px; display: grid; grid-template-columns: 1.1fr .9fr; overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
 .login-copy { padding: 48px; background: var(--sage-soft); display: flex; flex-direction: column; justify-content: center; }
-.login-copy img { width: 76px; height: 76px; border-radius: 14px; margin-bottom: 28px; }
+.login-copy img { width: min(210px, 80%); height: auto; aspect-ratio: 558 / 660; object-fit: contain; border-radius: 14px; margin-bottom: 28px; }
 .login-copy h2 { max-width: 420px; font-size: 31px; line-height: 1.15; }
 .login-copy > p:last-child { max-width: 430px; margin-top: 14px; color: var(--muted); line-height: 1.55; }
 .login-form { padding: 48px; display: flex; flex-direction: column; justify-content: center; }
@@ -185,6 +186,10 @@ td button { min-height: 32px; padding: 5px 9px; font-size: 11px; }
 .upload-zone { min-height: 190px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; border: 1px dashed var(--line); border-radius: 9px; background: var(--surface-muted); }
 .upload-zone > span { font-size: 28px; color: var(--coral); }
 .upload-zone p { margin: 0; color: var(--muted); font-size: 12px; }
+.upload-result { width: min(100%, 520px); display: grid; gap: 6px; text-align: center; }
+.upload-result:empty { display: none; }
+.upload-result strong { color: var(--ink); font-size: 12px; }
+.upload-result a { color: var(--blue); font-size: 11px; overflow-wrap: anywhere; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 20px; background: rgba(7, 10, 8, .62); }
 .modal { width: min(760px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; padding: 22px; background: var(--surface); box-shadow: var(--shadow); }
@@ -192,6 +197,7 @@ td button { min-height: 32px; padding: 5px 9px; font-size: 11px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid label { margin: 0; }
 .form-grid input, .form-grid select { width: 100%; }
+.form-grid select[multiple] { min-height: 126px; }
 .checkbox-field { min-height: 42px; display: flex; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; }
 .checkbox-field input { width: auto; min-height: auto; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }

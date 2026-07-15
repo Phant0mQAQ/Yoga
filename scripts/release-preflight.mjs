@@ -13,6 +13,20 @@ const renderYaml = readText("render.yaml");
 const adminVercel = readJson("apps/admin/vercel.json");
 
 check(mobilePackage.dependencies?.expo?.startsWith("~54."), "Expo must remain on SDK 54.");
+check(appJson.expo?.name === "Good Vibe Pilates & Yoga", "Unexpected Expo display name.");
+check(appJson.expo?.icon === "./assets/good-vibe-icon.png", "Unexpected Expo app icon.");
+check(appJson.expo?.splash?.image === "./assets/good-vibe-logo.png", "Unexpected Expo splash logo.");
+check(
+  appJson.expo?.android?.adaptiveIcon?.foregroundImage === "./assets/good-vibe-adaptive-icon.png",
+  "Unexpected Android adaptive icon."
+);
+for (const asset of [
+  "apps/mobile-expo/assets/good-vibe-logo.png",
+  "apps/mobile-expo/assets/good-vibe-icon.png",
+  "apps/mobile-expo/assets/good-vibe-adaptive-icon.png"
+]) {
+  check(fs.existsSync(path.join(root, asset)), `Missing brand asset: ${asset}`);
+}
 check(appJson.expo?.ios?.bundleIdentifier === "com.yomiyoga.studio", "Unexpected iOS bundle identifier.");
 check(
   appJson.expo?.plugins?.some(
@@ -44,7 +58,7 @@ if (process.argv.includes("--cloud")) {
   requireSecret(env.INITIAL_ADMIN_EMAIL, "INITIAL_ADMIN_EMAIL");
   requireSecret(env.INITIAL_ADMIN_PASSWORD, "INITIAL_ADMIN_PASSWORD", 12);
   requireSecret(env.EXPO_PUBLIC_API_BASE_URL, "EXPO_PUBLIC_API_BASE_URL");
-  requireSecret(env.YOMI_API_BASE_URL, "YOMI_API_BASE_URL");
+  requireSecret(env.GOOD_VIBE_API_BASE_URL ?? env.YOMI_API_BASE_URL, "GOOD_VIBE_API_BASE_URL");
   if (!env.SUPABASE_ACCESS_TOKEN) {
     notices.push("SUPABASE_ACCESS_TOKEN is not set; interactive `supabase login` is required.");
   }

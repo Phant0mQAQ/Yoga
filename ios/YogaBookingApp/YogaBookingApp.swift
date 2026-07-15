@@ -69,7 +69,7 @@ struct LoginView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Yoga Booking")
+            Text("Good Vibe Pilates & Yoga")
                 .font(.largeTitle.bold())
 
             Picker("Role", selection: $selectedRole) {

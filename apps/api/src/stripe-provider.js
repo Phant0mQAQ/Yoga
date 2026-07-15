@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
+const STRIPE_API_VERSION = "2026-02-25.clover";
 
 export async function createStripePaymentIntent({
   amount,
@@ -8,7 +9,8 @@ export async function createStripePaymentIntent({
   methodCode,
   orderId,
   customerEmail,
-  returnUrl
+  returnUrl,
+  idempotencyKey
 }) {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
@@ -29,7 +31,7 @@ export async function createStripePaymentIntent({
   payload.append("payment_method_types[]", stripeMethodCode(methodCode));
   if (customerEmail) payload.set("receipt_email", customerEmail);
 
-  return stripeRequest("/payment_intents", payload, secretKey);
+  return stripeRequest("/payment_intents", payload, secretKey, { idempotencyKey });
 }
 
 export async function createStripePaymentSheet({
@@ -38,14 +40,16 @@ export async function createStripePaymentSheet({
   methodCode,
   orderId,
   customerEmail,
-  merchantIdentifier = process.env.STRIPE_MERCHANT_IDENTIFIER ?? "merchant.com.yogabooking"
+  merchantIdentifier = process.env.STRIPE_MERCHANT_IDENTIFIER ?? "merchant.com.yomiyoga.studio",
+  idempotencyKey
 }) {
   const paymentIntent = await createStripePaymentIntent({
     amount,
     currency,
     methodCode,
     orderId,
-    customerEmail
+    customerEmail,
+    idempotencyKey
   });
 
   if (paymentIntent.mode === "mock") {
@@ -79,7 +83,8 @@ export async function createStripeCheckoutSession({
   orderId,
   productName,
   successUrl,
-  cancelUrl
+  cancelUrl,
+  idempotencyKey
 }) {
   const secretKey = process.env.STRIPE_SECRET_KEY;
   if (!secretKey) {
@@ -87,7 +92,11 @@ export async function createStripeCheckoutSession({
     return {
       mode: "mock",
       checkoutSessionId: mockId,
-      url: `${successUrl}?session_id=${mockId}&mock=true`
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      url: appendQueryParams(successUrl, {
+        session_id: mockId,
+        mock: "true"
+      })
     };
   }
 
@@ -99,33 +108,95 @@ export async function createStripeCheckoutSession({
   payload.append("payment_method_types[]", stripeMethodCode(methodCode));
   payload.set("line_items[0][price_data][currency]", currency.toLowerCase());
   payload.set("line_items[0][price_data][unit_amount]", String(amount));
-  payload.set("line_items[0][price_data][product_data][name]", productName ?? "Yoga booking");
+  payload.set("line_items[0][price_data][product_data][name]", productName ?? "Good Vibe Pilates & Yoga");
   payload.set("line_items[0][quantity]", "1");
 
-  return stripeRequest("/checkout/sessions", payload, secretKey);
+  return stripeRequest("/checkout/sessions", payload, secretKey, { idempotencyKey });
 }
 
-export function verifyStripeWebhook(rawBody, signatureHeader, secret = process.env.STRIPE_WEBHOOK_SECRET) {
-  if (!secret) {
-    return JSON.parse(rawBody || "{}");
+export async function createStripeRefund({
+  paymentIntentId,
+  chargeId,
+  amount,
+  reason,
+  idempotencyKey
+}) {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) {
+    return {
+      mode: "mock",
+      id: `re_mock_${crypto.randomBytes(8).toString("hex")}`,
+      amount,
+      status: "succeeded"
+    };
   }
+
+  const payload = new URLSearchParams();
+  if (paymentIntentId) payload.set("payment_intent", paymentIntentId);
+  else if (chargeId) payload.set("charge", chargeId);
+  else throw providerInputError("A Stripe payment intent or charge is required for refunds");
+  payload.set("amount", String(amount));
+  const stripeReason = ["duplicate", "fraudulent", "requested_by_customer"].includes(reason)
+    ? reason
+    : "requested_by_customer";
+  payload.set("reason", stripeReason);
+  if (reason && reason !== stripeReason) payload.set("metadata[internal_reason]", String(reason));
+
+  return stripeRequest("/refunds", payload, secretKey, { idempotencyKey });
+}
+
+export function verifyStripeWebhook(
+  rawBody,
+  signatureHeader,
+  secret = process.env.STRIPE_WEBHOOK_SECRET,
+  { toleranceSeconds = 300, now = Date.now() } = {}
+) {
+  const payload = normalizeWebhookPayload(rawBody);
+  if (!secret) return parseWebhookPayload(payload);
   if (!signatureHeader) {
-    throw new Error("Missing Stripe-Signature header");
+    throw webhookProblem("invalid_stripe_signature", "Missing Stripe-Signature header");
   }
-  const parts = Object.fromEntries(signatureHeader.split(",").map((part) => {
-    const [key, value] = part.split("=");
-    return [key, value];
-  }));
-  const timestamp = parts.t;
+
+  let timestampValue = null;
+  const signatures = [];
+  for (const rawPart of String(signatureHeader).split(",")) {
+    const separatorIndex = rawPart.indexOf("=");
+    if (separatorIndex < 0) continue;
+    const key = rawPart.slice(0, separatorIndex).trim();
+    const value = rawPart.slice(separatorIndex + 1).trim();
+    if (key === "t" && timestampValue === null) timestampValue = value;
+    if (key === "v1") signatures.push(value);
+  }
+
+  if (!timestampValue || !/^\d+$/.test(timestampValue) || signatures.length === 0) {
+    throw webhookProblem("invalid_stripe_signature", "Invalid Stripe-Signature header");
+  }
+  const timestamp = Number(timestampValue);
+  const currentSeconds = Math.floor(Number(now) / 1000);
+  if (!Number.isSafeInteger(timestamp) || !Number.isFinite(currentSeconds)) {
+    throw webhookProblem("invalid_stripe_signature", "Invalid Stripe webhook timestamp");
+  }
+  if (
+    !Number.isFinite(toleranceSeconds)
+    || toleranceSeconds < 0
+    || Math.abs(currentSeconds - timestamp) > toleranceSeconds
+  ) {
+    throw webhookProblem("stripe_webhook_timestamp_expired", "Stripe webhook timestamp is outside the allowed tolerance");
+  }
+
   const expected = crypto
     .createHmac("sha256", secret)
-    .update(`${timestamp}.${rawBody}`)
-    .digest("hex");
-  const actual = parts.v1;
-  if (!actual || !crypto.timingSafeEqual(Buffer.from(actual), Buffer.from(expected))) {
-    throw new Error("Invalid Stripe webhook signature");
+    .update(`${timestampValue}.${payload}`)
+    .digest();
+  const hasValidSignature = signatures.some((signature) => {
+    if (!/^[a-f\d]{64}$/i.test(signature)) return false;
+    const actual = Buffer.from(signature, "hex");
+    return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
+  });
+  if (!hasValidSignature) {
+    throw webhookProblem("invalid_stripe_signature", "Invalid Stripe webhook signature");
   }
-  return JSON.parse(rawBody || "{}");
+  return parseWebhookPayload(payload);
 }
 
 export function stripeMethodCode(methodCode) {
@@ -145,12 +216,14 @@ function methodRequiresRedirect(methodCode) {
   ].includes(methodCode);
 }
 
-async function stripeRequest(path, payload, secretKey) {
+async function stripeRequest(path, payload, secretKey, { idempotencyKey } = {}) {
   const response = await fetch(`${STRIPE_API_BASE}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded"
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Stripe-Version": STRIPE_API_VERSION,
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
     },
     body: payload
   });
@@ -164,4 +237,45 @@ async function stripeRequest(path, payload, secretKey) {
     throw err;
   }
   return data;
+}
+
+function appendQueryParams(value, params) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    throw providerInputError("Checkout success URL must be an absolute URL", "invalid_checkout_url");
+  }
+  for (const [key, paramValue] of Object.entries(params)) {
+    url.searchParams.set(key, paramValue);
+  }
+  return url.toString();
+}
+
+function normalizeWebhookPayload(rawBody) {
+  if (typeof rawBody === "string") return rawBody;
+  if (Buffer.isBuffer(rawBody)) return rawBody.toString("utf8");
+  return String(rawBody ?? "");
+}
+
+function parseWebhookPayload(payload) {
+  try {
+    return JSON.parse(payload || "{}");
+  } catch {
+    throw webhookProblem("invalid_webhook_payload", "Stripe webhook payload must be valid JSON");
+  }
+}
+
+function webhookProblem(code, message) {
+  const error = new Error(message);
+  error.status = 400;
+  error.code = code;
+  return error;
+}
+
+function providerInputError(message, code = "invalid_refund_request") {
+  const error = new Error(message);
+  error.status = 400;
+  error.code = code;
+  return error;
 }

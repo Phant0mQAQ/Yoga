@@ -9,7 +9,7 @@ import {
   login,
   ROLES
 } from "../apps/api/src/domain.js";
-import { signToken } from "../apps/api/src/auth.js";
+import { signToken, verifyToken } from "../apps/api/src/auth.js";
 
 const store = createSeedStore();
 
@@ -28,6 +28,7 @@ const studentAuth = {
 };
 
 assert.equal(studentLogin.session.activeRole, ROLES.STUDENT);
+assert.equal(verifyToken(studentLogin.token, store).activeRole, ROLES.STUDENT);
 
 const firstBooking = createBooking(store, studentAuth, {
   courseSessionId: "sess_flow_1",
@@ -84,6 +85,21 @@ assert.throws(() => login(store, {
   role: ROLES.STUDENT,
   locale: "en"
 }, signToken), /Email or password is incorrect/);
+
+{
+  const roleStore = createSeedStore();
+  const roleLogin = login(roleStore, {
+    email: "student@example.com",
+    password: DEMO_PASSWORD,
+    role: ROLES.STUDENT,
+    locale: "en"
+  }, signToken);
+  roleStore.users.find((user) => user.id === roleLogin.user.id).roles = [ROLES.STAFF];
+  assert.throws(
+    () => verifyToken(roleLogin.token, roleStore),
+    (error) => error?.status === 401 && error?.code === "role_revoked"
+  );
+}
 
 const previousNodeEnv = process.env.NODE_ENV;
 process.env.NODE_ENV = "production";

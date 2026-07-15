@@ -1,33 +1,36 @@
 {
   "expo": {
-    "name": "Yomi Yoga",
+    "name": "Good Vibe Pilates & Yoga",
     "slug": "yomi-yoga",
     "scheme": "yomiyoga",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/good-vibe-icon.png",
     "splash": {
-      "image": "./assets/splash-icon.png",
+      "image": "./assets/good-vibe-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#F7F6F2"
+      "backgroundColor": "#AAA5A3"
     },
     "ios": {
+      "icon": "./assets/good-vibe-icon.png",
       "supportsTablet": false,
       "bundleIdentifier": "com.yomiyoga.studio",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSCameraUsageDescription": "Camera access is used by staff and admins to scan booking check-in QR codes.",
+        "NSCameraUsageDescription": "Camera access is used by staff to scan booking check-in QR codes.",
         "NSPhotoLibraryUsageDescription": "Photo library access is used by admins to upload coach, content, and product images."
       }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F7F6F2"
+        "foregroundImage": "./assets/good-vibe-adaptive-icon.png",
+        "backgroundColor": "#AAA5A3"
       },
       "permissions": [
-        "android.permission.CAMERA",
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ]
     },
@@ -35,8 +38,20 @@
       "expo-router",
       "expo-secure-store",
       "expo-localization",
-      "expo-camera",
-      "expo-image-picker",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Camera access is used by staff to scan booking check-in QR codes.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "microphonePermission": false
+        }
+      ],
       [
         "@stripe/stripe-react-native",
         {

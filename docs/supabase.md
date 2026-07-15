@@ -26,6 +26,19 @@ SUPABASE_SECRET_KEY=sb_secret_YOUR_SERVER_KEY
 Never add the secret key to Expo, EAS public environment variables, or
 client-side source code.
 
+For admin images and other public content, create a public Storage bucket and
+add its plain bucket name (without `/`) to the server environment:
+
+```text
+SUPABASE_STORAGE_BUCKET=good-vibe-public
+```
+
+The API creates a signed upload URL that
+[Supabase documents as valid for two hours](https://supabase.com/docs/reference/javascript/file-buckets-createsigneduploadurl).
+Upload the raw file to `uploadUrl` with HTTP `PUT`; persist `publicUrl` in
+content records. The bucket must be public for that URL to remain readable.
+The server secret is used only by the API and is never returned to clients.
+
 ## 3. Start
 
 ```powershell
