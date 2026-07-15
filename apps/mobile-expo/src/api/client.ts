@@ -12,6 +12,7 @@ import type {
   Order,
   Payment,
   PaymentMethod,
+  PresignedUpload,
   Role,
   User
 } from "./types";
@@ -95,10 +96,14 @@ export async function createBooking(courseSessionId: string, paymentMode: "membe
   });
 }
 
-export async function checkIn(bookingId: string) {
+export async function order(orderId: string) {
+  return request<Order>(`/orders/${encodeURIComponent(orderId)}`);
+}
+
+export async function checkIn(bookingId: string, method: "manual" | "qr" = "manual") {
   return request(`/bookings/${bookingId}/check-in`, {
     method: "POST",
-    body: { method: "manual" }
+    body: { method }
   });
 }
 
@@ -112,7 +117,9 @@ export async function createPaymentSheet(input: {
   currency: string;
   country: string;
   methodCode: string;
+  idempotencyKey?: string;
 }) {
+  const { idempotencyKey: attemptKey, ...body } = input;
   return request<{
     payment: Payment;
     stripe: {
@@ -124,7 +131,8 @@ export async function createPaymentSheet(input: {
     };
   }>("/payments/stripe/payment-sheet", {
     method: "POST",
-    body: input
+    idempotencyKey: attemptKey ?? paymentIdempotencyKey("payment-sheet", input.orderId),
+    body
   });
 }
 
@@ -134,11 +142,15 @@ export async function createCheckoutSession(input: {
   currency: string;
   country: string;
   methodCode: string;
+  locale?: string;
+  idempotencyKey?: string;
 }) {
+  const { idempotencyKey: attemptKey, ...body } = input;
   return request<{ stripe: { url?: string } }>("/payments/stripe/checkout-sessions", {
     method: "POST",
+    idempotencyKey: attemptKey ?? paymentIdempotencyKey("checkout", input.orderId),
     body: {
-      ...input,
+      ...body,
       successUrl: Linking.createURL("/payment-return?status=success"),
       cancelUrl: Linking.createURL("/payment-return?status=cancel")
     }
@@ -163,7 +175,9 @@ export const adminApi = {
   payments: () => request<Payment[]>("/admin/payments"),
   refund: (paymentId: string, body: unknown) => adminWrite(`/admin/payments/${paymentId}/refunds`, "POST", body),
   auditLogs: () => request<AuditLog[]>("/admin/audit-logs"),
-  presignUpload: (body: unknown) => adminWrite("/admin/uploads/presign", "POST", body)
+  presignUpload: (body: { scope: string; fileName: string; contentType?: string }) => (
+    adminWrite<PresignedUpload>("/admin/uploads/presign", "POST", body)
+  )
 };
 
 async function adminWrite<T>(path: string, method: "POST" | "PATCH" | "DELETE", body: unknown) {
@@ -176,6 +190,13 @@ async function adminWrite<T>(path: string, method: "POST" | "PATCH" | "DELETE", 
 
 function idempotencyKey() {
   return `mobile-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+export function paymentIdempotencyKey(flow: "payment-intent" | "payment-sheet" | "checkout", orderId?: string) {
+  const hourBucket = Math.floor(Date.now() / (60 * 60 * 1000));
+  return orderId
+    ? `mobile-payment-${flow}-${orderId}-${hourBucket}`
+    : `mobile-payment-${flow}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 type RequestOptions = {
@@ -198,7 +219,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch {
-    throw new Error(`Cannot reach the Yomi Yoga API at ${API_BASE_URL}. Check that the API server is running and your iPhone can access this address.`);
+    throw new ApiError("Network request failed", 0, "network_error");
   }
   const rawBody = await response.text();
   let data: Record<string, unknown> = {};
@@ -229,11 +250,11 @@ function resolveApiBaseUrl() {
 
   const metroHost = hostFromUri(Constants.expoConfig?.hostUri);
   if (__DEV__ && metroHost && isLocalNetworkHost(metroHost)) {
-    return `http://${metroHost}:8090/api/v1`;
+    return `http://${metroHost}:8080/api/v1`;
   }
 
   if (configuredBaseUrl) return normalizeBaseUrl(configuredBaseUrl);
-  if (__DEV__) return "http://localhost:8090/api/v1";
+  if (__DEV__) return "http://localhost:8080/api/v1";
   throw new Error("EXPO_PUBLIC_API_BASE_URL must be configured for production builds");
 }
 

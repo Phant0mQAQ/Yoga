@@ -12,8 +12,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useSession } from "@/state/session";
-import { useTheme } from "@/state/theme";
-import { colors, radius, spacing } from "@/theme/tokens";
+import { useTheme, useThemedStyles } from "@/state/theme";
+import { radius, spacing } from "@/theme/tokens";
+import type { ThemeColors } from "@/theme/tokens";
 
 type IconName = ComponentProps<typeof Ionicons>["name"];
 
@@ -28,13 +29,19 @@ export function Screen({
   children: ReactNode;
   action?: ReactNode;
 }) {
+  const { styles } = useUiTheme();
+
   return (
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
         <View style={styles.brandRow}>
-          <Image source={require("../../assets/icon.png")} style={styles.brandIcon} />
+          <Image
+            accessibilityLabel="Good Vibe Pilates & Yoga logo"
+            source={require("../../assets/good-vibe-icon.png")}
+            style={styles.brandIcon}
+          />
           <View style={styles.headerCopy}>
-            <Text style={styles.brandName}>Yomi Yoga</Text>
+            <Text numberOfLines={2} style={styles.brandName}>Good Vibe Pilates & Yoga</Text>
             <Text style={styles.eyebrow}>{eyebrow ?? title}</Text>
           </View>
         </View>
@@ -52,6 +59,7 @@ export function AppearanceControls() {
   const { t } = useTranslation();
   const session = useSession();
   const theme = useTheme();
+  const { colors, styles } = useUiTheme();
 
   async function cycleLanguage() {
     const locales = ["en", "zh-Hans", "ko"] as const;
@@ -99,6 +107,7 @@ export function Card({
   tone?: "default" | "sage" | "coral" | "ink";
   style?: object;
 }) {
+  const { styles, toneStyles } = useUiTheme();
   return <View style={[styles.card, toneStyles[tone], style]}>{children}</View>;
 }
 
@@ -111,6 +120,8 @@ export function SectionHeader({
   meta?: string;
   action?: ReactNode;
 }) {
+  const { styles } = useUiTheme();
+
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionCopy}>
@@ -133,6 +144,8 @@ export function PrimaryButton({
   disabled?: boolean;
   icon?: IconName;
 }) {
+  const { colors, styles } = useUiTheme();
+
   return (
     <Pressable onPress={onPress} disabled={disabled} style={({ pressed }) => [
       styles.button,
@@ -154,6 +167,8 @@ export function GhostButton({
   onPress: () => void;
   icon?: IconName;
 }) {
+  const { colors, styles } = useUiTheme();
+
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.ghostButton, pressed && styles.pressed]}>
       <Ionicons name={icon} size={17} color={colors.text} />
@@ -171,6 +186,8 @@ export function IconButton({
   onPress: () => void;
   accessibilityLabel: string;
 }) {
+  const { colors, styles } = useUiTheme();
+
   return (
     <Pressable
       accessibilityLabel={accessibilityLabel}
@@ -195,6 +212,8 @@ export function Field({
   keyboardType?: "default" | "email-address" | "phone-pad" | "number-pad";
   secureTextEntry?: boolean;
 }) {
+  const { colors, styles } = useUiTheme();
+
   return (
     <TextInput
       value={value}
@@ -211,11 +230,67 @@ export function Field({
 }
 
 export function Loading() {
+  const { colors, styles } = useUiTheme();
+
   return (
     <SafeAreaView style={styles.loading}>
-      <Image source={require("../../assets/icon.png")} style={styles.loadingMark} />
+      <Image
+        accessibilityLabel="Good Vibe Pilates & Yoga logo"
+        source={require("../../assets/good-vibe-icon.png")}
+        style={styles.loadingMark}
+      />
       <ActivityIndicator color={colors.accentDark} />
     </SafeAreaView>
+  );
+}
+
+export function SessionRecovery({
+  message,
+  onRetry
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  const { styles } = useUiTheme();
+
+  return (
+    <SafeAreaView style={styles.loading}>
+      <Image
+        accessibilityLabel="Good Vibe Pilates & Yoga logo"
+        source={require("../../assets/good-vibe-icon.png")}
+        style={styles.loadingMark}
+      />
+      <Text style={styles.recoveryTitle}>{t("sessionRestoreFailed")}</Text>
+      <Text style={styles.recoveryMessage}>{message}</Text>
+      <PrimaryButton title={t("retry")} onPress={onRetry} icon="refresh-outline" />
+    </SafeAreaView>
+  );
+}
+
+export function QueryErrorNotice({
+  title,
+  message,
+  onRetry
+}: {
+  title: string;
+  message: string;
+  onRetry: () => void;
+}) {
+  const { t } = useTranslation();
+  const { colors, styles } = useUiTheme();
+
+  return (
+    <View accessibilityRole="alert" style={styles.queryErrorNotice}>
+      <View style={styles.queryErrorHeader}>
+        <Ionicons name="cloud-offline-outline" size={22} color={colors.danger} />
+        <View style={styles.queryErrorCopy}>
+          <Text selectable style={styles.queryErrorTitle}>{title}</Text>
+          <Text selectable style={styles.queryErrorMessage}>{message}</Text>
+        </View>
+      </View>
+      <GhostButton title={t("retry")} icon="refresh-outline" onPress={onRetry} />
+    </View>
   );
 }
 
@@ -228,6 +303,8 @@ export function Row({
   value: string | number;
   accent?: boolean;
 }) {
+  const { styles } = useUiTheme();
+
   return (
     <View style={styles.row}>
       <Text style={styles.rowLabel}>{label}</Text>
@@ -243,6 +320,8 @@ export function Pill({
   label: string;
   tone?: "sage" | "coral" | "blue" | "neutral";
 }) {
+  const { styles, pillStyles, pillTextStyles } = useUiTheme();
+
   return (
     <View style={[styles.pill, pillStyles[tone]]}>
       <Text style={[styles.pillText, pillTextStyles[tone]]}>{label.replaceAll("_", " ")}</Text>
@@ -261,6 +340,7 @@ export function Metric({
   icon: IconName;
   tone?: "sage" | "coral" | "blue";
 }) {
+  const { colors, styles } = useUiTheme();
   const iconColor = tone === "coral" ? colors.coral : tone === "blue" ? colors.blue : colors.accentDark;
   return (
     <View style={styles.metric}>
@@ -271,28 +351,34 @@ export function Metric({
   );
 }
 
-const toneStyles = StyleSheet.create({
-  default: {},
-  sage: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoft },
-  coral: { backgroundColor: colors.coralSoft, borderColor: colors.coralSoft },
-  ink: { backgroundColor: colors.black, borderColor: colors.black }
-});
+function useUiTheme() {
+  const { colors } = useTheme();
+  return { colors, ...useThemedStyles(createUiTheme) };
+}
 
-const pillStyles = StyleSheet.create({
-  sage: { backgroundColor: colors.accentSoft },
-  coral: { backgroundColor: colors.coralSoft },
-  blue: { backgroundColor: colors.blueSoft },
-  neutral: { backgroundColor: colors.surfaceMuted }
-});
+function createUiTheme(colors: ThemeColors) {
+  const toneStyles = StyleSheet.create({
+    default: {},
+    sage: { backgroundColor: colors.accentSoft, borderColor: colors.accentSoft },
+    coral: { backgroundColor: colors.coralSoft, borderColor: colors.coralSoft },
+    ink: { backgroundColor: colors.black, borderColor: colors.black }
+  });
 
-const pillTextStyles = StyleSheet.create({
-  sage: { color: colors.accentDark },
-  coral: { color: colors.coral },
-  blue: { color: colors.blue },
-  neutral: { color: colors.muted }
-});
+  const pillStyles = StyleSheet.create({
+    sage: { backgroundColor: colors.accentSoft },
+    coral: { backgroundColor: colors.coralSoft },
+    blue: { backgroundColor: colors.blueSoft },
+    neutral: { backgroundColor: colors.surfaceMuted }
+  });
 
-export const styles = StyleSheet.create({
+  const pillTextStyles = StyleSheet.create({
+    sage: { color: colors.accentDark },
+    coral: { color: colors.coral },
+    blue: { color: colors.blue },
+    neutral: { color: colors.muted }
+  });
+
+  const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: colors.background
@@ -349,8 +435,9 @@ export const styles = StyleSheet.create({
   },
   brandName: {
     color: colors.text,
-    fontSize: 18,
-    fontWeight: "800"
+    fontSize: 14,
+    fontWeight: "800",
+    lineHeight: 17
   },
   eyebrow: {
     color: colors.muted,
@@ -452,6 +539,47 @@ export const styles = StyleSheet.create({
     height: 72,
     borderRadius: radius.lg
   },
+  recoveryTitle: {
+    color: colors.text,
+    fontSize: 20,
+    fontWeight: "800",
+    textAlign: "center"
+  },
+  recoveryMessage: {
+    maxWidth: 320,
+    color: colors.muted,
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: "center"
+  },
+  queryErrorNotice: {
+    gap: spacing.md,
+    backgroundColor: colors.coralSoft,
+    borderWidth: 1,
+    borderColor: colors.coralSoft,
+    borderRadius: radius.lg,
+    padding: spacing.lg
+  },
+  queryErrorHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.md
+  },
+  queryErrorCopy: {
+    flex: 1,
+    minWidth: 0
+  },
+  queryErrorTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "800"
+  },
+  queryErrorMessage: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 3
+  },
   row: {
     minHeight: 36,
     flexDirection: "row",
@@ -508,4 +636,7 @@ export const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 12
   }
-});
+  });
+
+  return { styles, toneStyles, pillStyles, pillTextStyles };
+}

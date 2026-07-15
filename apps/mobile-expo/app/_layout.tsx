@@ -4,7 +4,7 @@ import { useEffect, useMemo } from "react";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "@/i18n";
 import { isUnauthorizedError } from "@/api/client";
-import { Loading } from "@/components/ui";
+import { Loading, SessionRecovery } from "@/components/ui";
 import { PaymentProvider } from "@/components/payment-provider";
 import { SessionProvider } from "@/state/session";
 import { useSession } from "@/state/session";
@@ -41,14 +41,22 @@ function SessionNavigator() {
   const targetGroup = session.role ? `(${session.role})` : "(auth)";
 
   useEffect(() => {
-    if (!session.ready) return;
+    if (!session.ready || session.hydrationError) return;
 
-    if (currentGroup !== targetGroup) {
+    if (currentGroup !== "payment-return" && currentGroup !== targetGroup) {
       router.replace(routeForRole(session.role));
     }
-  }, [currentGroup, session.ready, session.role, targetGroup]);
+  }, [currentGroup, session.hydrationError, session.ready, session.role, targetGroup]);
 
   if (!session.ready) return <Loading />;
+  if (session.hydrationError) {
+    return (
+      <SessionRecovery
+        message={session.hydrationError}
+        onRetry={() => void session.retryHydration()}
+      />
+    );
+  }
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(auth)" />
@@ -56,6 +64,7 @@ function SessionNavigator() {
       <Stack.Screen name="(coach)" />
       <Stack.Screen name="(staff)" />
       <Stack.Screen name="(admin)" />
+      <Stack.Screen name="payment-return" />
     </Stack>
   );
 }

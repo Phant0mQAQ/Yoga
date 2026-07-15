@@ -11,7 +11,9 @@ const server = spawn(process.execPath, ["apps/api/server.js"], {
     PORT,
     SUPABASE_URL: "",
     SUPABASE_SERVICE_ROLE_KEY: "",
-    SUPABASE_SECRET_KEY: ""
+    SUPABASE_SECRET_KEY: "",
+    STRIPE_SECRET_KEY: "",
+    STRIPE_WEBHOOK_SECRET: ""
   },
   stdio: ["ignore", "pipe", "pipe"]
 });
@@ -38,6 +40,24 @@ try {
   assert.equal((await api("/me", { token: coach.token })).activeRole, "coach");
   assert.equal((await api("/me", { token: staff.token })).activeRole, "staff");
   assert.equal((await api("/me", { token: admin.token })).activeRole, "admin");
+
+  const rescheduleStartsAt = new Date(Date.now() + 14 * 86_400_000);
+  const rescheduleSession = await api("/admin/course-sessions", {
+    method: "POST",
+    token: admin.token,
+    idempotencyKey: "full-flow-reschedule-session",
+    expectStatus: 201,
+    body: {
+      id: "sess_flow_reschedule",
+      courseId: "course_flow",
+      coachId: "coach_sora",
+      startsAt: rescheduleStartsAt.toISOString(),
+      endsAt: new Date(rescheduleStartsAt.getTime() + 3_600_000).toISOString(),
+      capacity: 8,
+      status: "open"
+    }
+  });
+  assert.equal(rescheduleSession.bookedCount, 0);
 
   const cards = await api("/member-cards", { token: student.token });
   assert.equal(cards.length, 1);
@@ -74,9 +94,9 @@ try {
   const rescheduled = await api(`/bookings/${secondBooking.booking.id}/reschedule`, {
     method: "POST",
     token: student.token,
-    body: { nextCourseSessionId: "sess_flow_1" }
+    body: { nextCourseSessionId: rescheduleSession.id }
   });
-  assert.equal(rescheduled.booking.courseSessionId, "sess_flow_1");
+  assert.equal(rescheduled.booking.courseSessionId, rescheduleSession.id);
   const cancelled = await api(`/bookings/${secondBooking.booking.id}/cancel`, {
     method: "POST",
     token: student.token,
@@ -97,13 +117,29 @@ try {
   const intent = await api("/payments/stripe/payment-intents", {
     method: "POST",
     token: student.token,
+    idempotencyKey: "full-flow-payment-intent",
     expectStatus: 201,
     body: { orderId: createdOrder.order.id, country: "KR", currency: "KRW", methodCode: "card" }
   });
   assert.ok(intent.payment.id);
+  const paymentSucceeded = await api("/payments/stripe/webhook", {
+    method: "POST",
+    body: {
+      id: "evt_full_flow_payment_succeeded",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: intent.payment.stripePaymentIntentId,
+          latest_charge: "ch_full_flow_mock"
+        }
+      }
+    }
+  });
+  assert.equal(paymentSucceeded.payment.status, "succeeded");
   const sheet = await api("/payments/stripe/payment-sheet", {
     method: "POST",
     token: student.token,
+    idempotencyKey: "full-flow-payment-sheet",
     expectStatus: 201,
     body: { amount: 10000, country: "KR", currency: "KRW", methodCode: "kr_card" }
   });
@@ -111,6 +147,7 @@ try {
   const checkout = await api("/payments/stripe/checkout-sessions", {
     method: "POST",
     token: student.token,
+    idempotencyKey: "full-flow-checkout",
     expectStatus: 201,
     body: {
       amount: 10000,
@@ -182,6 +219,15 @@ try {
     body: { toUserId: "usr_staff" }
   });
 
+  const invalidRefund = await api(`/admin/payments/${intent.payment.id}/refunds`, {
+    method: "POST",
+    token: admin.token,
+    idempotencyKey: "full-flow-refund-invalid",
+    expectStatus: 400,
+    body: { amount: -5, reason: "full_flow_test" }
+  });
+  assert.equal(invalidRefund.error, "invalid_refund_amount");
+
   const refund = await api(`/admin/payments/${intent.payment.id}/refunds`, {
     method: "POST",
     token: admin.token,
@@ -190,6 +236,9 @@ try {
     body: { reason: "full_flow_test" }
   });
   assert.equal(refund.payment.refundStatus, "refunded");
+  assert.equal(refund.refund.amount, createdOrder.order.totalAmount);
+  assert.ok(refund.refund.providerRefundId.startsWith("re_mock_"));
+  assert.equal(refund.stripe.mode, "mock");
   assert.ok((await api("/admin/audit-logs", { token: admin.token })).length > 0);
 
   assert.equal((await api("/admin/dashboard", { token: staff.token, expectStatus: 403 })).error, "forbidden");

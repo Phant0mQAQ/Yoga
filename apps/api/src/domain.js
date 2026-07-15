@@ -22,6 +22,14 @@ export const PAYMENT_STATUS = Object.freeze({
   REFUNDED: "refunded"
 });
 
+export const CHECK_IN_EARLY_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const CHECK_IN_LATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+const EU_COUNTRIES = new Set([
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR",
+  "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"
+]);
+
 export const DEMO_PASSWORD = "Yomi@2026";
 
 export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
@@ -301,6 +309,7 @@ export function createSeedStore() {
     orderItems: [],
     payments: [],
     refunds: [],
+    stripeEvents: [],
     reviews: [
       {
         id: "rev_1",
@@ -364,7 +373,7 @@ export function repairKnownTranslations(store) {
   const repair = (current, corrected) => {
     if (!current || typeof current !== "object") return current;
     const serialized = JSON.stringify(current);
-    if (!/[鍥绉鐟娴鞖雼靷鏅]/.test(serialized) && !serialized.includes("?")) {
+    if (!/[鍥绉鐟娴鞖雼靷鏅\uFFFD]/.test(serialized)) {
       return current;
     }
     changed = true;
@@ -581,7 +590,7 @@ export function getPaymentMethods({ currency = "HKD", country = "HK", recurring 
   const normalizedCountry = country.toUpperCase();
   return PAYMENT_METHODS.filter((method) => {
     const currencyOk = method.currencies.includes("*") || method.currencies.includes(normalizedCurrency);
-    const countryOk = method.countries.includes("*") || method.countries.includes(normalizedCountry) || method.countries.includes("EU");
+    const countryOk = isCountryEligible(method, normalizedCountry);
     const recurringOk = !recurring || method.recurring;
     return currencyOk && countryOk && recurringOk;
   }).map((method) => ({
@@ -591,54 +600,81 @@ export function getPaymentMethods({ currency = "HKD", country = "HK", recurring 
   }));
 }
 
-export function createBooking(store, auth, body, idempotencyKey) {
+export function createBooking(store, auth, body = {}, idempotencyKey) {
   requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
-  return withIdempotency(store, idempotencyKey, "createBooking", () => {
+  const userId = auth.activeRole === ROLES.STUDENT ? auth.userId : body.userId;
+  const scope = `createBooking:${auth.userId}:${auth.activeRole}:${userId ?? "missing"}`;
+  return withIdempotency(store, idempotencyKey, scope, () => {
+    if (!userId) throw problem(400, "missing_user_id", "userId is required for staff/admin booking");
+    byIdRequired(store.users, userId, "user_not_found");
     const courseSession = byIdRequired(store.courseSessions, body.courseSessionId, "course_session_not_found");
     const course = byIdRequired(store.courses, courseSession.courseId, "course_not_found");
     if (courseSession.status !== "open") {
       throw problem(409, "session_closed", "Course session is not open");
     }
-    if (courseSession.bookedCount >= courseSession.capacity) {
+    requireFutureSession(courseSession);
+    const capacity = requirePositiveInteger(courseSession.capacity, "invalid_session_capacity", "capacity");
+    const bookedCount = requireNonNegativeInteger(courseSession.bookedCount ?? 0, "invalid_booked_count", "bookedCount");
+    if (store.bookings.some((booking) => (
+      booking.userId === userId
+      && booking.courseSessionId === courseSession.id
+      && booking.status !== BOOKING_STATUS.CANCELLED
+    ))) {
+      throw problem(409, "duplicate_booking", "User already has an active booking for this course session");
+    }
+    if (bookedCount >= capacity) {
       throw problem(409, "session_full", "Course session is full");
     }
 
-    const userId = auth.activeRole === ROLES.STUDENT ? auth.userId : body.userId;
-    if (!userId) throw problem(400, "missing_user_id", "userId is required for staff/admin booking");
-
-    const activeCard = store.memberCards.find((card) => card.userId === userId && card.status === "active");
     const shouldUseCard = body.paymentMode === "member_card";
+    const creditCost = shouldUseCard
+      ? requirePositiveInteger(course.memberCardDeductCount, "invalid_course_credit_cost", "memberCardDeductCount")
+      : 0;
+    const activeCards = store.memberCards
+      .filter((card) => card.userId === userId)
+      .map((card) => normalizeMemberCardStatus(card))
+      .filter((card) => card.status === "active" && new Date(card.expiresAt).getTime() > Date.now())
+      .sort((left, right) => (
+        new Date(left.expiresAt).getTime() - new Date(right.expiresAt).getTime()
+        || left.id.localeCompare(right.id)
+      ));
+    const activeCard = shouldUseCard
+      ? activeCards.find((card) => Number.isSafeInteger(card.remainingCredits) && card.remainingCredits >= creditCost)
+      : null;
     let status = BOOKING_STATUS.PENDING_PAYMENT;
     let order = null;
 
     if (shouldUseCard) {
-      if (!activeCard) throw problem(409, "no_active_card", "User has no active member card");
-      if (activeCard.remainingCredits < course.memberCardDeductCount) {
+      if (!activeCards.length) throw problem(409, "no_active_card", "User has no active, unexpired member card");
+      if (!activeCard) throw problem(409, "insufficient_credits", "Member card does not have enough credits");
+      const remainingCredits = requireNonNegativeInteger(activeCard.remainingCredits, "invalid_card_credits", "remainingCredits");
+      if (remainingCredits < creditCost) {
         throw problem(409, "insufficient_credits", "Member card does not have enough credits");
       }
-      activeCard.remainingCredits -= course.memberCardDeductCount;
+      activeCard.remainingCredits = remainingCredits - creditCost;
       store.cardTransactions.push({
         id: id("ctx"),
         cardId: activeCard.id,
         userId,
         type: "deduct",
-        credits: -course.memberCardDeductCount,
+        credits: -creditCost,
         reason: "booking",
         createdAt: new Date().toISOString()
       });
       status = BOOKING_STATUS.CONFIRMED;
     } else {
+      const priceAmount = requirePositiveInteger(course.priceAmount, "invalid_course_price", "priceAmount");
       order = createOrderInternal(store, userId, [{
         type: "course_session",
         refId: courseSession.id,
         title: course.title,
         quantity: 1,
-        unitAmount: course.priceAmount,
+        unitAmount: priceAmount,
         currency: course.currency
       }]);
     }
 
-    courseSession.bookedCount += 1;
+    courseSession.bookedCount = bookedCount + 1;
     const booking = {
       id: id("bkg"),
       userId,
@@ -647,6 +683,7 @@ export function createBooking(store, auth, body, idempotencyKey) {
       coachId: courseSession.coachId,
       orderId: order?.id ?? null,
       memberCardId: shouldUseCard ? activeCard.id : null,
+      memberCardCreditsUsed: shouldUseCard ? creditCost : 0,
       status,
       startsAt: courseSession.startsAt,
       endsAt: courseSession.endsAt,
@@ -668,26 +705,54 @@ export function cancelBooking(store, auth, bookingId, reason = "user_request") {
   }
   if (booking.status === BOOKING_STATUS.CANCELLED) return { booking };
 
+  let cardRefund = null;
+  if (booking.memberCardId) {
+    const card = byIdRequired(store.memberCards, booking.memberCardId, "member_card_not_found");
+    const course = byId(store.courses, booking.courseId);
+    const refundCredits = requirePositiveInteger(
+      booking.memberCardCreditsUsed ?? course?.memberCardDeductCount,
+      "invalid_booking_credit_cost",
+      "memberCardCreditsUsed"
+    );
+    const remainingCredits = requireNonNegativeInteger(card.remainingCredits, "invalid_card_credits", "remainingCredits");
+    const totalCredits = requirePositiveInteger(card.totalCredits, "invalid_card_credits", "totalCredits");
+    if (!Number.isSafeInteger(remainingCredits + refundCredits) || remainingCredits + refundCredits > totalCredits) {
+      throw problem(409, "card_credit_invariant", "Cancellation would exceed the member card credit total");
+    }
+    cardRefund = { card, refundCredits, nextRemainingCredits: remainingCredits + refundCredits };
+  }
+
+  const previousStatus = booking.status;
   booking.status = BOOKING_STATUS.CANCELLED;
   booking.cancelledAt = new Date().toISOString();
   booking.cancelReason = reason;
   const session = byId(store.courseSessions, booking.courseSessionId);
   if (session) session.bookedCount = Math.max(0, session.bookedCount - 1);
 
-  if (booking.memberCardId) {
-    const card = byId(store.memberCards, booking.memberCardId);
-    const course = byId(store.courses, booking.courseId);
-    if (card && course) {
-      card.remainingCredits += course.memberCardDeductCount;
-      store.cardTransactions.push({
-        id: id("ctx"),
-        cardId: card.id,
-        userId: booking.userId,
-        type: "refund",
-        credits: course.memberCardDeductCount,
-        reason: "booking_cancelled",
-        createdAt: new Date().toISOString()
-      });
+  if (cardRefund) {
+    cardRefund.card.remainingCredits = cardRefund.nextRemainingCredits;
+    store.cardTransactions.push({
+      id: id("ctx"),
+      cardId: cardRefund.card.id,
+      userId: cardRefund.card.userId,
+      type: "refund",
+      credits: cardRefund.refundCredits,
+      reason: "booking_cancelled",
+      createdAt: new Date().toISOString()
+    });
+  }
+  if (previousStatus === BOOKING_STATUS.PENDING_PAYMENT && booking.orderId) {
+    const order = byId(store.orders, booking.orderId);
+    if (order && order.status === "pending_payment") {
+      order.status = "cancelled";
+      order.cancelledAt = booking.cancelledAt;
+      order.resourcesReleasedAt = booking.cancelledAt;
+    }
+    for (const payment of store.payments.filter((candidate) => candidate.orderId === booking.orderId)) {
+      if ([PAYMENT_STATUS.REQUIRES_PAYMENT, PAYMENT_STATUS.PROCESSING].includes(payment.status)) {
+        payment.status = PAYMENT_STATUS.FAILED;
+        payment.failureReason = "booking_cancelled";
+      }
     }
   }
   audit(store, auth, "booking.cancel", booking.id, { reason });
@@ -701,27 +766,102 @@ export function rescheduleBooking(store, auth, bookingId, nextSessionId) {
     throw problem(409, "not_reschedulable", "Only confirmed bookings can be rescheduled");
   }
   const nextSession = byIdRequired(store.courseSessions, nextSessionId, "course_session_not_found");
-  if (nextSession.status !== "open" || nextSession.bookedCount >= nextSession.capacity) {
+  if (nextSession.id === booking.courseSessionId) return { booking };
+  requireFutureSession(nextSession);
+
+  const previousSession = byIdRequired(store.courseSessions, booking.courseSessionId, "course_session_not_found");
+  const previousCourse = byIdRequired(store.courses, booking.courseId, "course_not_found");
+  const nextCourse = byIdRequired(store.courses, nextSession.courseId, "course_not_found");
+  const previousBookedCount = requireNonNegativeInteger(previousSession.bookedCount ?? 0, "invalid_booked_count", "bookedCount");
+  const nextBookedCount = requireNonNegativeInteger(nextSession.bookedCount ?? 0, "invalid_booked_count", "bookedCount");
+  const nextCapacity = requirePositiveInteger(nextSession.capacity, "invalid_session_capacity", "capacity");
+  if (nextSession.status !== "open" || nextBookedCount >= nextCapacity) {
     throw problem(409, "next_session_unavailable", "Next session is unavailable");
   }
-  const previousSession = byId(store.courseSessions, booking.courseSessionId);
-  if (previousSession) previousSession.bookedCount = Math.max(0, previousSession.bookedCount - 1);
-  nextSession.bookedCount += 1;
+  if (store.bookings.some((candidate) => (
+    candidate.id !== booking.id
+    && candidate.userId === booking.userId
+    && candidate.courseSessionId === nextSession.id
+    && candidate.status !== BOOKING_STATUS.CANCELLED
+  ))) {
+    throw problem(409, "duplicate_booking", "User already has an active booking for the target course session");
+  }
+
+  let card = null;
+  let remainingCredits = null;
+  let creditDelta = 0;
+  if (booking.memberCardId) {
+    card = byIdRequired(store.memberCards, booking.memberCardId, "member_card_not_found");
+    const previousCost = requirePositiveInteger(
+      booking.memberCardCreditsUsed ?? previousCourse.memberCardDeductCount,
+      "invalid_booking_credit_cost",
+      "memberCardCreditsUsed"
+    );
+    const nextCost = requirePositiveInteger(nextCourse.memberCardDeductCount, "invalid_course_credit_cost", "memberCardDeductCount");
+    remainingCredits = requireNonNegativeInteger(card.remainingCredits, "invalid_card_credits", "remainingCredits");
+    const totalCredits = requirePositiveInteger(card.totalCredits, "invalid_card_credits", "totalCredits");
+    creditDelta = nextCost - previousCost;
+    if (creditDelta > remainingCredits) {
+      throw problem(409, "insufficient_credits", "Member card does not have enough credits for the target course");
+    }
+    if (remainingCredits - creditDelta > totalCredits) {
+      throw problem(409, "card_credit_invariant", "Reschedule would exceed the member card credit total");
+    }
+  } else if (booking.orderId && (
+    previousCourse.currency !== nextCourse.currency
+    || previousCourse.priceAmount !== nextCourse.priceAmount
+  )) {
+    throw problem(409, "reschedule_payment_adjustment_required", "Paid bookings can only move to a course with the same price and currency");
+  }
+
+  previousSession.bookedCount = Math.max(0, previousBookedCount - 1);
+  nextSession.bookedCount = nextBookedCount + 1;
+  if (card && creditDelta !== 0) {
+    card.remainingCredits = remainingCredits - creditDelta;
+    store.cardTransactions.push({
+      id: id("ctx"),
+      cardId: card.id,
+      userId: booking.userId,
+      type: creditDelta > 0 ? "deduct" : "refund",
+      credits: -creditDelta,
+      reason: "booking_rescheduled",
+      createdAt: new Date().toISOString()
+    });
+  }
   booking.courseSessionId = nextSession.id;
   booking.courseId = nextSession.courseId;
   booking.coachId = nextSession.coachId;
   booking.startsAt = nextSession.startsAt;
   booking.endsAt = nextSession.endsAt;
+  if (card) booking.memberCardCreditsUsed = requirePositiveInteger(nextCourse.memberCardDeductCount, "invalid_course_credit_cost", "memberCardDeductCount");
   booking.updatedAt = new Date().toISOString();
-  audit(store, auth, "booking.reschedule", booking.id, { nextSessionId });
+  audit(store, auth, "booking.reschedule", booking.id, { nextSessionId, creditDelta });
   return { booking };
 }
 
 export function checkInBooking(store, auth, bookingId, method = "manual") {
   requireRole(auth, [ROLES.COACH, ROLES.STAFF, ROLES.ADMIN]);
   const booking = byIdRequired(store.bookings, bookingId, "booking_not_found");
-  if (![BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.PENDING_PAYMENT].includes(booking.status)) {
-    throw problem(409, "not_checkin_eligible", "Booking cannot be checked in");
+  if (booking.status !== BOOKING_STATUS.CONFIRMED) {
+    throw problem(409, "not_checkin_eligible", "Only a confirmed booking can be checked in");
+  }
+  const startsAt = new Date(booking.startsAt).getTime();
+  const endsAt = new Date(booking.endsAt).getTime();
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
+    throw problem(409, "invalid_checkin_window", "Booking has an invalid check-in time window");
+  }
+  const now = Date.now();
+  if (now < startsAt - CHECK_IN_EARLY_WINDOW_MS) {
+    throw problem(409, "checkin_too_early", "Check-in opens 24 hours before the course starts");
+  }
+  if (now > endsAt + CHECK_IN_LATE_WINDOW_MS) {
+    throw problem(409, "checkin_window_closed", "Check-in closes 24 hours after the course ends");
+  }
+  if (auth.activeRole === ROLES.COACH) {
+    const coach = store.coaches.find((candidate) => candidate.userId === auth.userId);
+    if (!coach || booking.coachId !== coach.id) {
+      throw problem(403, "coach_booking_forbidden", "Coaches can only check in bookings for their own sessions");
+    }
   }
   booking.status = BOOKING_STATUS.CHECKED_IN;
   booking.checkedInAt = new Date().toISOString();
@@ -738,38 +878,89 @@ export function checkInBooking(store, auth, bookingId, method = "manual") {
   return { booking, checkIn };
 }
 
-export function createOrder(store, auth, body, idempotencyKey) {
+export function createOrder(store, auth, body = {}, idempotencyKey) {
   requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
-  return withIdempotency(store, idempotencyKey, "createOrder", () => {
-    const userId = auth.activeRole === ROLES.STUDENT ? auth.userId : body.userId;
-    const items = (body.items ?? []).map((item) => {
+  const userId = auth.activeRole === ROLES.STUDENT ? auth.userId : body.userId;
+  const scope = `createOrder:${auth.userId}:${auth.activeRole}:${userId ?? "missing"}`;
+  return withIdempotency(store, idempotencyKey, scope, () => {
+    if (!userId) throw problem(400, "missing_user_id", "userId is required for staff/admin orders");
+    byIdRequired(store.users, userId, "user_not_found");
+    if (!Array.isArray(body.items)) throw problem(400, "invalid_order_items", "items must be an array");
+    const pendingItems = body.items.map((item) => {
       const product = byIdRequired(store.products, item.productId, "product_not_found");
-      if (product.stock < item.quantity) throw problem(409, "insufficient_stock", "Product stock is insufficient");
-      product.stock -= item.quantity;
+      const quantity = requirePositiveInteger(item.quantity, "invalid_quantity", "quantity");
+      const stock = requireNonNegativeInteger(product.stock, "invalid_product_stock", "stock");
+      const unitAmount = requirePositiveInteger(product.priceAmount, "invalid_product_price", "priceAmount");
+      if (stock < quantity) throw problem(409, "insufficient_stock", "Product stock is insufficient");
       return {
+        product,
+        stock,
         type: "product",
         refId: product.id,
         title: product.title,
-        quantity: item.quantity,
-        unitAmount: product.priceAmount,
+        quantity,
+        unitAmount,
         currency: product.currency
       };
     });
+    validateOrderItems(pendingItems);
+    for (const item of pendingItems) item.product.stock = item.stock - item.quantity;
+    const items = pendingItems.map(({ product, stock, ...item }) => item);
     const order = createOrderInternal(store, userId, items);
     audit(store, auth, "order.create", order.id, {});
     return { order };
   });
 }
 
-export function createPaymentRecord(store, auth, { orderId, amount, currency, country, methodCode, providerPayload }) {
+export function validatePaymentRequest(store, auth, {
+  orderId,
+  amount,
+  currency,
+  country,
+  methodCode = "card"
+} = {}) {
   requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
   const order = orderId ? byIdRequired(store.orders, orderId, "order_not_found") : null;
+  if (order && auth.activeRole === ROLES.STUDENT && order.userId !== auth.userId) {
+    throw problem(403, "forbidden", "Cannot pay another user's order");
+  }
+  if (order && order.status !== "pending_payment") {
+    throw problem(409, "order_not_payable", "Order is not awaiting payment");
+  }
   const method = PAYMENT_METHODS.find((item) => item.code === methodCode);
   if (!method) throw problem(400, "unsupported_payment_method", "Unsupported payment method");
-  const normalizedCurrency = (currency ?? order?.currency ?? "HKD").toUpperCase();
-  const normalizedCountry = (country ?? "HK").toUpperCase();
+  const normalizedCurrency = String(currency ?? order?.currency ?? "HKD").trim().toUpperCase();
+  const normalizedCountry = String(country ?? "HK").trim().toUpperCase();
+  const normalizedAmount = requirePositiveInteger(amount ?? order?.totalAmount, "invalid_payment_amount", "amount");
+  if (order && normalizedAmount !== order.totalAmount) {
+    throw problem(409, "payment_amount_mismatch", "Payment amount must equal the order total");
+  }
+  if (order && normalizedCurrency !== String(order.currency).toUpperCase()) {
+    throw problem(409, "payment_currency_mismatch", "Payment currency must equal the order currency");
+  }
   if (!isMethodEligible(method, normalizedCurrency, normalizedCountry)) {
     throw problem(400, "payment_method_not_eligible", `${methodCode} is not eligible for ${normalizedCurrency}/${normalizedCountry}`);
+  }
+  return {
+    order,
+    orderId: order?.id ?? null,
+    amount: normalizedAmount,
+    currency: normalizedCurrency,
+    country: normalizedCountry,
+    methodCode,
+    method
+  };
+}
+
+export function createPaymentRecord(store, auth, request = {}) {
+  const { providerPayload } = request;
+  const resolved = validatePaymentRequest(store, auth, request);
+  const { order, amount, currency, country, methodCode, method } = resolved;
+  const existingPayment = order && store.payments.find((payment) => (
+    payment.orderId === order.id && payment.status !== PAYMENT_STATUS.FAILED
+  ));
+  if (existingPayment) {
+    throw problem(409, "order_payment_in_progress", "This order already has an active payment attempt");
   }
   const payment = {
     id: id("pay"),
@@ -778,13 +969,16 @@ export function createPaymentRecord(store, auth, { orderId, amount, currency, co
     paymentProvider: "stripe",
     paymentMethodFamily: method.family,
     paymentMethodCode: method.code,
-    amount: amount ?? order?.totalAmount,
-    currency: normalizedCurrency,
-    country: normalizedCountry,
+    amount,
+    currency,
+    country,
     status: PAYMENT_STATUS.REQUIRES_PAYMENT,
     refundStatus: "none",
     stripePaymentIntentId: providerPayload?.paymentIntentId ?? null,
     stripeCheckoutSessionId: providerPayload?.checkoutSessionId ?? null,
+    stripeCheckoutUrl: providerPayload?.checkoutUrl ?? null,
+    stripeCheckoutExpiresAt: providerPayload?.checkoutExpiresAt ?? null,
+    stripeMode: providerPayload?.mode ?? null,
     stripeChargeId: null,
     webhookEventId: null,
     createdAt: new Date().toISOString()
@@ -794,60 +988,202 @@ export function createPaymentRecord(store, auth, { orderId, amount, currency, co
   return payment;
 }
 
+export function prepareRefund(store, paymentId, amount) {
+  const payment = byIdRequired(store.payments, paymentId, "payment_not_found");
+  if (payment.status !== PAYMENT_STATUS.SUCCEEDED) {
+    throw problem(409, "payment_not_refundable", "Only a succeeded payment can be refunded");
+  }
+  if (!payment.stripePaymentIntentId && !payment.stripeChargeId) {
+    throw problem(409, "payment_provider_reference_missing", "Payment is missing a refundable Stripe reference");
+  }
+  const locallyCommittedAmount = store.refunds
+    .filter((refund) => refund.paymentId === payment.id)
+    .filter((refund) => !["failed", "canceled"].includes(refund.status))
+    .reduce((sum, refund) => sum + refund.amount, 0);
+  const committedAmount = Math.max(
+    locallyCommittedAmount,
+    Number.isSafeInteger(payment.stripeAmountRefunded) ? payment.stripeAmountRefunded : 0
+  );
+  const remainingAmount = payment.amount - committedAmount;
+  if (remainingAmount <= 0) {
+    throw problem(409, "payment_already_refunded", "Payment has no refundable amount remaining");
+  }
+  const normalizedAmount = requirePositiveInteger(amount ?? remainingAmount, "invalid_refund_amount", "amount");
+  if (normalizedAmount > remainingAmount) {
+    throw problem(409, "refund_amount_exceeds_remaining", "Refund amount exceeds the refundable payment amount");
+  }
+  return { payment, amount: normalizedAmount, remainingAmount };
+}
+
+export function recordRefund(store, paymentId, {
+  amount,
+  reason,
+  providerRefundId,
+  status = "succeeded"
+} = {}) {
+  const prepared = prepareRefund(store, paymentId, amount);
+  const refund = {
+    id: id("ref"),
+    paymentId: prepared.payment.id,
+    amount: prepared.amount,
+    currency: prepared.payment.currency,
+    status,
+    reason: reason ?? "requested_by_customer",
+    providerRefundId: providerRefundId ?? null,
+    createdAt: new Date().toISOString()
+  };
+  store.refunds.push(refund);
+  syncPaymentRefundStatus(store, prepared.payment);
+  return { refund, payment: prepared.payment };
+}
+
 export function applyStripeEvent(store, event) {
-  if (!event?.id || store.payments.some((payment) => payment.webhookEventId === event.id)) {
+  if (!event?.id) {
     return { applied: false, reason: "duplicate_or_missing_event_id" };
   }
 
   const type = event.type;
+  const supportedTypes = new Set([
+    "payment_intent.succeeded",
+    "checkout.session.completed",
+    "checkout.session.async_payment_succeeded",
+    "checkout.session.async_payment_failed",
+    "checkout.session.expired",
+    "payment_intent.payment_failed",
+    "charge.refunded",
+    "refund.updated"
+  ]);
+  if (!supportedTypes.has(type)) {
+    return { applied: false, reason: "unsupported_event_type" };
+  }
+  store.stripeEvents ??= [];
+  if (
+    store.stripeEvents.some((processed) => processed.eventId === event.id)
+    || store.payments.some((payment) => payment.webhookEventId === event.id)
+  ) {
+    return { applied: false, reason: "duplicate_or_missing_event_id" };
+  }
+
   const object = event.data?.object ?? {};
   let payment = null;
 
   if (object.payment_intent) {
     payment = store.payments.find((item) => item.stripePaymentIntentId === object.payment_intent);
   }
+  if (!payment && object.charge) {
+    payment = store.payments.find((item) => item.stripeChargeId === object.charge);
+  }
   if (!payment && object.id) {
-    payment = store.payments.find((item) => item.stripePaymentIntentId === object.id || item.stripeCheckoutSessionId === object.id);
+    payment = store.payments.find((item) => (
+      item.stripePaymentIntentId === object.id
+      || item.stripeCheckoutSessionId === object.id
+      || item.stripeChargeId === object.id
+    ));
   }
 
   if (!payment) {
     return { applied: false, reason: "payment_not_found" };
   }
 
-  payment.webhookEventId = event.id;
-  if (type === "payment_intent.succeeded" || type === "checkout.session.completed") {
-    payment.status = PAYMENT_STATUS.SUCCEEDED;
-    if (object.latest_charge) payment.stripeChargeId = object.latest_charge;
-    markOrderPaid(store, payment.orderId);
-  } else if (type === "payment_intent.payment_failed") {
-    payment.status = PAYMENT_STATUS.FAILED;
-  } else if (type === "charge.refunded" || type === "refund.updated") {
-    payment.refundStatus = "refunded";
-    payment.status = PAYMENT_STATUS.REFUNDED;
+  if (object.payment_intent && !payment.stripePaymentIntentId) {
+    payment.stripePaymentIntentId = object.payment_intent;
   }
+  if (object.latest_charge && !payment.stripeChargeId) payment.stripeChargeId = object.latest_charge;
+  if (type === "charge.refunded" && object.id && !payment.stripeChargeId) {
+    payment.stripeChargeId = object.id;
+  }
+
+  const checkoutCompletedAndPaid = type === "checkout.session.completed"
+    && [undefined, "paid", "no_payment_required"].includes(object.payment_status);
+  if (
+    type === "payment_intent.succeeded"
+    || type === "checkout.session.async_payment_succeeded"
+    || checkoutCompletedAndPaid
+  ) {
+    if (payment.status !== PAYMENT_STATUS.REFUNDED) {
+      payment.status = PAYMENT_STATUS.SUCCEEDED;
+      markOrderPaid(store, payment.orderId, payment);
+    }
+  } else if (type === "checkout.session.completed") {
+    if (![PAYMENT_STATUS.SUCCEEDED, PAYMENT_STATUS.REFUNDED].includes(payment.status)) {
+      payment.status = PAYMENT_STATUS.PROCESSING;
+    }
+  } else if ([
+    "payment_intent.payment_failed",
+    "checkout.session.async_payment_failed",
+    "checkout.session.expired"
+  ].includes(type)) {
+    if (![PAYMENT_STATUS.SUCCEEDED, PAYMENT_STATUS.REFUNDED].includes(payment.status)) {
+      payment.status = PAYMENT_STATUS.FAILED;
+      releasePendingOrderResources(
+        store,
+        payment.orderId,
+        type === "checkout.session.expired" ? "payment_expired" : "payment_failed"
+      );
+    }
+  } else if (type === "charge.refunded") {
+    syncStripeChargeRefunds(store, payment, object);
+    const amountRefunded = Number(object.amount_refunded);
+    if (Number.isSafeInteger(amountRefunded) && amountRefunded >= 0) {
+      payment.stripeAmountRefunded = Math.max(payment.stripeAmountRefunded ?? 0, amountRefunded);
+    }
+    syncPaymentRefundStatus(store, payment);
+  } else if (type === "refund.updated") {
+    const refund = store.refunds.find((item) => item.providerRefundId === object.id);
+    if (!refund) return { applied: false, reason: "refund_not_found" };
+    refund.status = mergeRefundStatus(refund.status, object.status);
+    syncPaymentRefundStatus(store, payment);
+  }
+  payment.webhookEventId = event.id;
+  store.stripeEvents.push({
+    id: id("ste"),
+    eventId: event.id,
+    type,
+    paymentId: payment.id,
+    processedAt: new Date().toISOString()
+  });
   return { applied: true, payment };
 }
 
 export function memberCardOperation(store, auth, cardId, operation, body = {}) {
   requireRole(auth, [ROLES.STAFF, ROLES.ADMIN]);
   const card = byIdRequired(store.memberCards, cardId, "member_card_not_found");
+  normalizeMemberCardStatus(card);
   const now = new Date().toISOString();
 
   if (operation === "freeze") {
+    const frozenUntil = new Date(body.frozenUntil ?? Date.now() + 30 * 24 * 60 * 60 * 1000);
+    if (!Number.isFinite(frozenUntil.getTime()) || frozenUntil.getTime() <= Date.now()) {
+      throw problem(400, "invalid_frozen_until", "frozenUntil must be a future date");
+    }
     card.status = "frozen";
-    card.frozenUntil = body.frozenUntil ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+    card.frozenUntil = frozenUntil.toISOString();
   } else if (operation === "extend") {
-    const days = Number(body.days ?? 30);
+    const days = requirePositiveInteger(Number(body.days ?? 30), "invalid_extension_days", "days");
     card.expiresAt = new Date(new Date(card.expiresAt).getTime() + days * 24 * 60 * 60 * 1000).toISOString();
   } else if (operation === "transfer") {
     if (!body.toUserId) throw problem(400, "missing_to_user_id", "toUserId is required");
+    byIdRequired(store.users, body.toUserId, "user_not_found");
+    if (body.toUserId === card.userId) throw problem(409, "same_card_owner", "Member card already belongs to this user");
+    const hasOutstandingBooking = store.bookings.some((booking) => (
+      booking.memberCardId === card.id
+      && [BOOKING_STATUS.PENDING_PAYMENT, BOOKING_STATUS.CONFIRMED].includes(booking.status)
+    ));
+    if (hasOutstandingBooking) {
+      throw problem(409, "card_has_active_bookings", "Member card cannot be transferred while it has active bookings");
+    }
+    card.transferredFromUserId = card.userId;
     card.userId = body.toUserId;
-    card.status = "transferred";
+    card.transferredAt = now;
   } else if (operation === "upgrade") {
-    const credits = Number(body.addCredits ?? 0);
-    card.totalCredits += credits;
-    card.remainingCredits += credits;
-    card.status = "upgraded";
+    const credits = requirePositiveInteger(Number(body.addCredits), "invalid_credit_amount", "addCredits");
+    const totalCredits = requirePositiveInteger(card.totalCredits, "invalid_card_credits", "totalCredits");
+    const remainingCredits = requireNonNegativeInteger(card.remainingCredits, "invalid_card_credits", "remainingCredits");
+    if (!Number.isSafeInteger(totalCredits + credits) || !Number.isSafeInteger(remainingCredits + credits)) {
+      throw problem(400, "invalid_credit_amount", "addCredits is too large");
+    }
+    card.totalCredits = totalCredits + credits;
+    card.remainingCredits = remainingCredits + credits;
   } else {
     throw problem(400, "unsupported_operation", "Unsupported member-card operation");
   }
@@ -857,7 +1193,7 @@ export function memberCardOperation(store, auth, cardId, operation, body = {}) {
     cardId,
     userId: card.userId,
     type: operation,
-    credits: Number(body.addCredits ?? 0),
+    credits: operation === "upgrade" ? Number(body.addCredits) : 0,
     reason: body.reason ?? operation,
     createdAt: now
   });
@@ -926,16 +1262,17 @@ export function audit(store, auth, action, entityId, metadata) {
 }
 
 function createOrderInternal(store, userId, items) {
-  if (!items.length) throw problem(400, "empty_order", "Order must contain at least one item");
+  validateOrderItems(items);
   const currency = items[0].currency;
-  if (items.some((item) => item.currency !== currency)) {
-    throw problem(400, "mixed_currency_order", "Order items must use one currency");
+  const totalAmount = items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0);
+  if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) {
+    throw problem(400, "invalid_order_total", "Order total must be a positive safe integer");
   }
   const order = {
     id: id("ord"),
     userId,
     status: "pending_payment",
-    totalAmount: items.reduce((sum, item) => sum + item.unitAmount * item.quantity, 0),
+    totalAmount,
     currency,
     paymentId: null,
     createdAt: new Date().toISOString()
@@ -951,14 +1288,167 @@ function createOrderInternal(store, userId, items) {
   return order;
 }
 
-function markOrderPaid(store, orderId) {
+function markOrderPaid(store, orderId, payment) {
   if (!orderId) return;
   const order = byId(store.orders, orderId);
-  if (order) order.status = "paid";
   const booking = store.bookings.find((item) => item.orderId === orderId);
+  if (order?.resourcesReleasedAt || booking?.status === BOOKING_STATUS.CANCELLED) {
+    if (order) order.status = "refund_required";
+    if (payment) payment.refundStatus = "refund_required";
+    return;
+  }
+  if (order) order.status = "paid";
   if (booking && booking.status === BOOKING_STATUS.PENDING_PAYMENT) {
     booking.status = BOOKING_STATUS.CONFIRMED;
   }
+}
+
+function syncPaymentRefundStatus(store, payment) {
+  const paymentRefunds = store.refunds.filter((refund) => refund.paymentId === payment.id);
+  const succeededAmount = paymentRefunds
+    .filter((refund) => refund.status === "succeeded")
+    .reduce((sum, refund) => sum + refund.amount, 0);
+  const hasPending = paymentRefunds.some((refund) => !["succeeded", "failed", "canceled"].includes(refund.status));
+  const providerAmount = Number.isSafeInteger(payment.stripeAmountRefunded)
+    ? payment.stripeAmountRefunded
+    : 0;
+  const effectiveSucceededAmount = Math.max(succeededAmount, providerAmount);
+  if (payment.status === PAYMENT_STATUS.REFUNDED) {
+    payment.refundStatus = "refunded";
+    return;
+  }
+  if (effectiveSucceededAmount >= payment.amount) {
+    payment.status = PAYMENT_STATUS.REFUNDED;
+    payment.refundStatus = "refunded";
+    releaseBookingReservation(store, payment.orderId, "payment_refunded", [
+      BOOKING_STATUS.PENDING_PAYMENT,
+      BOOKING_STATUS.CONFIRMED
+    ]);
+    const order = byId(store.orders, payment.orderId);
+    if (order) order.status = "refunded";
+  } else if (effectiveSucceededAmount > 0) {
+    if (payment.status !== PAYMENT_STATUS.REFUNDED) payment.status = PAYMENT_STATUS.SUCCEEDED;
+    payment.refundStatus = "partially_refunded";
+  } else {
+    payment.refundStatus = hasPending ? "pending" : "none";
+  }
+}
+
+function syncStripeChargeRefunds(store, payment, charge) {
+  const providerRefunds = Array.isArray(charge.refunds?.data) ? charge.refunds.data : [];
+  for (const providerRefund of providerRefunds) {
+    if (!providerRefund?.id || !Number.isSafeInteger(providerRefund.amount) || providerRefund.amount <= 0) continue;
+    const existing = store.refunds.find((refund) => refund.providerRefundId === providerRefund.id);
+    if (existing) {
+      existing.status = mergeRefundStatus(existing.status, providerRefund.status);
+      continue;
+    }
+    store.refunds.push({
+      id: id("ref"),
+      paymentId: payment.id,
+      amount: providerRefund.amount,
+      currency: String(providerRefund.currency ?? payment.currency).toUpperCase(),
+      status: providerRefund.status ?? "pending",
+      reason: providerRefund.reason ?? "requested_by_customer",
+      providerRefundId: providerRefund.id,
+      createdAt: Number.isSafeInteger(providerRefund.created)
+        ? new Date(providerRefund.created * 1000).toISOString()
+        : new Date().toISOString()
+    });
+  }
+}
+
+function mergeRefundStatus(currentStatus, incomingStatus) {
+  if (!incomingStatus) return currentStatus;
+  const terminalStatuses = new Set(["succeeded", "failed", "canceled"]);
+  if (terminalStatuses.has(currentStatus)) return currentStatus;
+  return incomingStatus;
+}
+
+function validateOrderItems(items) {
+  if (!Array.isArray(items) || !items.length) {
+    throw problem(400, "empty_order", "Order must contain at least one item");
+  }
+  const currency = String(items[0].currency ?? "").toUpperCase();
+  if (!currency || items.some((item) => String(item.currency ?? "").toUpperCase() !== currency)) {
+    throw problem(400, "mixed_currency_order", "Order items must use one currency");
+  }
+  for (const item of items) {
+    requirePositiveInteger(item.quantity, "invalid_quantity", "quantity");
+    requirePositiveInteger(item.unitAmount, "invalid_unit_amount", "unitAmount");
+  }
+}
+
+function requirePositiveInteger(value, code, fieldName) {
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw problem(400, code, `${fieldName} must be a positive integer`);
+  }
+  return value;
+}
+
+function requireNonNegativeInteger(value, code, fieldName) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw problem(400, code, `${fieldName} must be a non-negative integer`);
+  }
+  return value;
+}
+
+export function normalizeMemberCardStatus(card, now = Date.now()) {
+  if (
+    card?.status === "frozen"
+    && Number.isFinite(new Date(card.frozenUntil).getTime())
+    && new Date(card.frozenUntil).getTime() <= now
+  ) {
+    card.status = "active";
+    card.unfrozenAt = new Date(now).toISOString();
+  }
+  return card;
+}
+
+export function releasePendingOrderResources(store, orderId, reason = "payment_failed") {
+  const order = byId(store.orders, orderId);
+  if (order?.resourcesReleasedAt) return null;
+  const released = releaseBookingReservation(
+    store,
+    orderId,
+    reason,
+    [BOOKING_STATUS.PENDING_PAYMENT]
+  );
+  if (order) {
+    for (const item of store.orderItems.filter((candidate) => candidate.orderId === order.id && candidate.type === "product")) {
+      const product = byId(store.products, item.refId);
+      if (product) product.stock = requireNonNegativeInteger(product.stock, "invalid_product_stock", "stock") + item.quantity;
+    }
+  }
+  if (order && order.status === "pending_payment") {
+    order.status = reason;
+    order.resourcesReleasedAt = new Date().toISOString();
+  }
+  return released;
+}
+
+function releaseBookingReservation(store, orderId, reason, eligibleStatuses) {
+  if (!orderId) return null;
+  const booking = store.bookings.find((candidate) => candidate.orderId === orderId);
+  if (!booking || !eligibleStatuses.includes(booking.status)) return booking ?? null;
+  booking.status = BOOKING_STATUS.CANCELLED;
+  booking.cancelReason = reason;
+  booking.cancelledAt = new Date().toISOString();
+  const session = byId(store.courseSessions, booking.courseSessionId);
+  if (session) session.bookedCount = Math.max(0, Number(session.bookedCount ?? 0) - 1);
+  return booking;
+}
+
+function requireFutureSession(session, now = Date.now()) {
+  const startsAt = new Date(session?.startsAt).getTime();
+  const endsAt = new Date(session?.endsAt).getTime();
+  if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
+    throw problem(409, "invalid_session_time", "Course session has an invalid time range");
+  }
+  if (startsAt <= now) {
+    throw problem(409, "session_started", "Course session has already started");
+  }
+  return session;
 }
 
 function withIdempotency(store, key, scope, handler) {
@@ -980,6 +1470,12 @@ function withIdempotency(store, key, scope, handler) {
 
 function isMethodEligible(method, currency, country) {
   const currencyOk = method.currencies.includes("*") || method.currencies.includes(currency);
-  const countryOk = method.countries.includes("*") || method.countries.includes(country) || method.countries.includes("EU");
+  const countryOk = isCountryEligible(method, country);
   return currencyOk && countryOk;
+}
+
+function isCountryEligible(method, country) {
+  return method.countries.includes("*")
+    || method.countries.includes(country)
+    || (method.countries.includes("EU") && EU_COUNTRIES.has(country));
 }

@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Yoga Booking API
-  version: 0.1.0
+  title: Good Vibe Pilates & Yoga API
+  version: 0.2.0
 servers:
-  - url: http://localhost:8090/api/v1
+  - url: http://localhost:8080/api/v1
 security:
   - bearerAuth: []
 components:
@@ -19,6 +19,8 @@ components:
       required: true
       schema:
         type: string
+        minLength: 1
+      description: Required for mutation replay safety. Reuse the same key for one business attempt.
   schemas:
     Error:
       type: object
@@ -27,6 +29,10 @@ components:
           type: string
         message:
           type: string
+        details:
+          type:
+            - object
+            - "null"
     LocalizedText:
       type: object
       properties:
@@ -101,6 +107,101 @@ components:
           enum: [native_or_checkout, redirect, checkout_redirect]
         recurring:
           type: boolean
+    Payment:
+      type: object
+      required: [id, userId, amount, currency, status, refundStatus]
+      properties:
+        id:
+          type: string
+        orderId:
+          type:
+            - string
+            - "null"
+        userId:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        currency:
+          type: string
+        country:
+          type: string
+        paymentProvider:
+          const: stripe
+        paymentMethodCode:
+          type: string
+        status:
+          enum: [requires_payment, processing, succeeded, failed, refunded]
+        refundStatus:
+          enum: [none, pending, partially_refunded, refunded, refund_required]
+          description: refund_required means a late provider success arrived after the local order resources were released and must be refunded.
+        refundedAmount:
+          type: integer
+          minimum: 0
+          description: Admin responses only; maximum of confirmed local and Stripe aggregate refunds.
+        refundableAmount:
+          type: integer
+          minimum: 0
+          description: Admin responses only; amount not already refunded or committed to a pending refund.
+    PaymentCreateRequest:
+      type: object
+      required: [currency, country, methodCode]
+      description: Supply orderId for an order payment. Without orderId, amount is required.
+      properties:
+        orderId:
+          type: string
+        amount:
+          type: integer
+          minimum: 1
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+        country:
+          type: string
+          minLength: 2
+          maxLength: 2
+        methodCode:
+          type: string
+        locale:
+          enum: [en, zh-Hans, ko]
+          description: Checkout return-page locale. The authenticated user's locale is used when omitted.
+    PaymentCreateResponse:
+      type: object
+      required: [payment, stripe]
+      properties:
+        payment:
+          $ref: "#/components/schemas/Payment"
+        stripe:
+          type: object
+          additionalProperties: true
+    RefundRequest:
+      type: object
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          description: Minor currency units. Omit to refund the entire remaining refundable amount.
+        reason:
+          type: string
+    PresignedUpload:
+      type: object
+      required: [storage, objectKey, uploadUrl, publicUrl, expiresAt]
+      properties:
+        storage:
+          enum: [supabase, memory]
+        objectKey:
+          type: string
+        uploadUrl:
+          type: string
+          format: uri
+          description: Upload the raw file to this signed URL with HTTP PUT before expiresAt.
+        publicUrl:
+          type: string
+          format: uri
+        expiresAt:
+          type: string
+          format: date-time
 paths:
   /auth/login:
     post:
@@ -183,6 +284,7 @@ paths:
     get:
       security: []
       summary: Available course sessions.
+      description: Returns only future sessions; closed or full sessions may be included with their current availability state.
       parameters:
         - name: coachId
           in: query
@@ -261,7 +363,8 @@ paths:
           description: Rescheduled booking.
   /bookings/{id}/check-in:
     post:
-      summary: Check in a booking.
+      summary: Check in a confirmed booking as its coach, staff, or admin.
+      description: Check-in is accepted from 24 hours before the session start until 24 hours after it ends.
       parameters:
         - name: id
           in: path
@@ -271,9 +374,14 @@ paths:
       responses:
         "200":
           description: Check-in result.
+        "403":
+          description: A coach attempted to check in another coach's booking.
+        "409":
+          description: Booking is pending payment, cancelled, already checked in, too early, or outside the late check-in window.
   /member-cards:
     get:
       summary: List member cards visible to current role.
+      description: Available to students, staff, and admins. Expired freeze periods are normalized back to active status.
       responses:
         "200":
           description: Member cards.
@@ -323,6 +431,7 @@ paths:
   /orders:
     get:
       summary: List orders visible to current role.
+      description: Available to students, staff, and admins.
       responses:
         "200":
           description: Orders.
@@ -371,34 +480,143 @@ paths:
   /payments/stripe/payment-intents:
     post:
       summary: Create Stripe PaymentIntent.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreateRequest"
       responses:
         "201":
           description: Payment and Stripe payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentCreateResponse"
+        "400":
+          description: Missing idempotency key or invalid payment request.
+        "409":
+          description: Order mismatch, non-payable order, or another active payment attempt.
   /payments/stripe/checkout-sessions:
     post:
-      summary: Create Stripe Checkout Session.
+      summary: Create or reuse a Stripe Checkout Session for an order.
+      description: The server supplies HTTPS return-bridge URLs. A different key for the same unexpired order Checkout reuses its session and URL.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentCreateRequest"
       responses:
         "201":
-          description: Payment and Stripe payload.
+          description: New or safely reused payment and Stripe Checkout payload.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentCreateResponse"
+        "400":
+          description: Missing idempotency key or invalid payment request.
+        "409":
+          description: Order mismatch, non-payable order, or conflicting active payment flow.
   /payments/stripe/payment-sheet:
     post:
       summary: Create Stripe PaymentSheet payload for Expo or React Native clients.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/PaymentCreateRequest"
+                - type: object
+                  properties:
+                    merchantIdentifier:
+                      type: string
       responses:
         "201":
           description: Payment, PaymentIntent client secret, publishable key, and merchant identifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentCreateResponse"
+        "400":
+          description: Missing idempotency key or invalid payment request.
+        "409":
+          description: Order mismatch, non-payable order, or another active payment attempt.
   /payments/{id}/refunds:
     post:
       summary: Refund a payment.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
       responses:
         "201":
           description: Refund.
+        "400":
+          description: Invalid refund amount or missing idempotency key.
+        "409":
+          description: Payment is not refundable or amount exceeds the remaining balance.
   /payments/stripe/webhook:
     post:
       security: []
       summary: Stripe webhook receiver.
+      description: Handles PaymentIntent success/failure, paid or delayed Checkout completion, Checkout expiry, charge refunds, and refund status updates. Failed or expired attempts release reserved booking capacity or product stock once. A late success after release is marked refund_required instead of fulfilling the order.
+      parameters:
+        - name: Stripe-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Required when STRIPE_WEBHOOK_SECRET is configured. Signatures older than five minutes are rejected.
       responses:
         "200":
           description: Webhook applied or ignored.
+        "400":
+          description: Invalid signature, expired timestamp, or malformed JSON payload.
+  /payments/return:
+    get:
+      servers:
+        - url: http://localhost:8080
+      security: []
+      summary: HTTPS Checkout return bridge to the yomiyoga app URL scheme.
+      description: Production APP_BASE_URL must use HTTPS. This page never fulfills an order; Stripe webhooks remain authoritative.
+      parameters:
+        - name: status
+          in: query
+          schema:
+            enum: [success, cancel, pending]
+            default: pending
+        - name: locale
+          in: query
+          schema:
+            enum: [en, zh-Hans, ko]
+            default: en
+        - name: session_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Localized HTML page that automatically and manually links back to the app.
+          content:
+            text/html:
+              schema:
+                type: string
   /admin/dashboard:
     get:
       summary: Admin mobile dashboard metrics and pending work.
@@ -418,17 +636,126 @@ paths:
         "200":
           description: Member.
     patch:
-      summary: Update member profile fields.
+      summary: Update member profile fields and validated roles.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                phone:
+                  type: string
+                locale:
+                  enum: [en, zh-Hans, ko]
+                roles:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    enum: [student, coach, staff, admin]
       responses:
         "200":
           description: Updated member.
+        "400":
+          description: Invalid email or roles.
+        "409":
+          description: Duplicate email, missing login identity, or attempted removal of the last admin.
+  /admin/payments:
+    get:
+      summary: List payments with safe refund aggregates for admin actions.
+      responses:
+        "200":
+          description: Payments with refundedAmount and refundableAmount; refund records are not embedded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Payment"
+  /admin/payments/{id}/refunds:
+    post:
+      summary: Create a full or partial Stripe refund as an administrator.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "200":
+          description: Recorded refund, updated payment, and Stripe provider payload.
+        "400":
+          description: Invalid refund amount or missing idempotency key.
+        "409":
+          description: Payment is not refundable or amount exceeds the remaining balance.
   /admin/uploads/presign:
     post:
-      summary: Create an upload URL for mobile admin image uploads.
+      summary: Create a Supabase signed upload URL or development-only memory URL.
+      description: With SUPABASE_STORAGE_BUCKET configured, the signed URL lasts two hours and the pre-created bucket must be public for publicUrl to work.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName]
+              properties:
+                scope:
+                  type: string
+                fileName:
+                  type: string
+                contentType:
+                  type: string
       responses:
         "200":
           description: Presigned upload metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignedUpload"
+        "400":
+          description: Missing idempotency key.
+        "503":
+          description: Durable storage is not configured in production.
+  /mock-upload/{objectKey}:
+    put:
+      servers:
+        - url: http://localhost:8080
+      security: []
+      summary: Development-only raw upload target returned by the presign endpoint.
+      parameters:
+        - name: objectKey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: Upload stored in process memory.
+        "410":
+          description: Upload URL expired.
+        "413":
+          description: File exceeds the 10 MB development limit.

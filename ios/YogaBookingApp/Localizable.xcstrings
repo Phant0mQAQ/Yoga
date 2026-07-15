@@ -61,10 +61,10 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "学员" } }
       }
     },
-    "Yoga Booking" : {
+    "Good Vibe Pilates & Yoga" : {
       "localizations" : {
-        "ko" : { "stringUnit" : { "state" : "translated", "value" : "요가 예약" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "瑜伽预约" } }
+        "ko" : { "stringUnit" : { "state" : "translated", "value" : "Good Vibe Pilates & Yoga" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Good Vibe Pilates & Yoga" } }
       }
     }
   },

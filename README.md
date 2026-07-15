@@ -1,6 +1,6 @@
-# Yoga Booking System
+# Good Vibe Pilates & Yoga
 
-This repository is a runnable v1 foundation for the planned yoga booking and management system.
+This repository contains the Good Vibe Pilates & Yoga booking and studio management system.
 
 It intentionally uses no npm dependencies so it can run in this workspace without package installation. The backend is implemented with built-in Node modules and can persist its complete business state in Supabase Postgres through the Supabase REST API.
 
@@ -34,15 +34,15 @@ Use the bundled Node runtime or any Node 20+:
 
 ```powershell
 cd C:\Users\23161\Documents\Codex\2026-06-01\files-mentioned-by-the-user-1\outputs\yoga-booking-system
-$env:PORT=8090
+$env:PORT=8080
 node apps/api/server.js
 ```
 
 Then open:
 
-- API health: `http://localhost:8090/health`
-- Admin UI: `http://localhost:8090/admin`
-- Mobile PWA preview: `http://localhost:8090/app`
+- API health: `http://localhost:8080/health`
+- Admin UI: `http://localhost:8080/admin`
+- Mobile PWA preview: `http://localhost:8080/app`
 
 ## Supabase
 
@@ -62,6 +62,12 @@ npm run start:supabase
 The health endpoint reports `"database": "supabase"` when persistence is
 active. See `docs/supabase.md` for details. Never expose the service-role key to
 Expo or any client application.
+
+For durable admin media uploads, pre-create a **public** Supabase Storage
+bucket and set `SUPABASE_STORAGE_BUCKET` to its bucket name (no slash). The API
+creates two-hour signed upload URLs; clients upload the raw file with HTTP
+`PUT`. Without this variable, the in-process upload fallback is available only
+outside production and is lost when the API restarts.
 
 ## Test
 
@@ -97,6 +103,12 @@ eas submit --platform ios
 
 Expo Go can test basic screens and API calls. Stripe PaymentSheet, Apple Pay, and camera check-in require an EAS Development Build or TestFlight.
 
+### Brand assets and release identity
+
+The public display name is `Good Vibe Pilates & Yoga`. The supplied full logo is retained byte-for-byte for login and splash surfaces, with square and adaptive variants under each client app's `assets` directory.
+
+The existing Expo slug, URL scheme, iOS bundle identifier, EAS project ID, Apple Pay merchant identifier, Render service URL, and Supabase table name intentionally remain unchanged. They are release and data compatibility identifiers, not public-facing brand copy; changing them requires coordinated migrations in Expo, Apple, Stripe, Render, and Supabase.
+
 ## Demo Login
 
 Seed users:
@@ -117,6 +129,12 @@ STRIPE_SECRET_KEY=sk_live_or_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 APP_BASE_URL=https://your-domain.example
 ```
+
+All three Stripe payment-creation endpoints require an `Idempotency-Key`.
+Order Checkout retries reuse the unexpired session, and Checkout returns via
+the HTTPS `/payments/return` bridge before opening the `yomiyoga` app scheme.
+Payment fulfillment remains webhook-driven, following Stripe's
+[mobile Checkout guidance](https://docs.stripe.com/mobile/digital-goods/checkout).
 
 The implementation supports:
 

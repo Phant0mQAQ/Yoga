@@ -1,33 +1,158 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import * as Linking from "expo-linking";
+import { getLocales } from "expo-localization";
+import { useRef, useState } from "react";
+import { Alert, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { availability, createBooking, memberCards, paymentMethods } from "@/api/client";
-import type { AvailabilitySession, Participant } from "@/api/types";
-import { GhostButton, Loading, Metric, Pill, PrimaryButton, Screen, SectionHeader } from "@/components/ui";
+import {
+  availability,
+  bookings as listBookings,
+  createBooking,
+  createCheckoutSession,
+  memberCards,
+  order as getOrder,
+  paymentMethods
+} from "@/api/client";
+import type { AvailabilitySession, LocalizedText, Order, Participant } from "@/api/types";
+import { GhostButton, Loading, Metric, Pill, PrimaryButton, QueryErrorNotice, Screen, SectionHeader } from "@/components/ui";
 import { useSession } from "@/state/session";
-import { colors, radius, spacing } from "@/theme/tokens";
+import { useTheme, useThemedStyles } from "@/state/theme";
+import { radius, spacing } from "@/theme/tokens";
+import type { ThemeColors } from "@/theme/tokens";
+import {
+  apiErrorTranslationKey,
+  localizedApiError
+} from "@/utils/api-error";
+import {
+  pendingBookingsBySession,
+  resolveCheckoutPaymentRegion,
+  resolvePaymentRegion,
+  selectEligibleMemberCard
+} from "@/utils/booking";
 
 export default function StudentScreen() {
   const { t } = useTranslation();
   const session = useSession();
+  const bookingRequestInFlight = useRef(false);
+  const [bookingClassId, setBookingClassId] = useState<string | null>(null);
+  const deviceRegionCode = getLocales()[0]?.regionCode;
+  const paymentRegion = resolvePaymentRegion(deviceRegionCode);
+  const { colors, styles } = useStudentTheme();
   const classes = useQuery({
     queryKey: ["availability", session.locale],
     queryFn: () => availability(session.locale),
     enabled: Boolean(session.token)
   });
   const cards = useQuery({ queryKey: ["member-cards"], queryFn: memberCards, enabled: Boolean(session.token) });
+  const bookingHistory = useQuery({
+    queryKey: ["bookings", "student", session.locale],
+    queryFn: () => listBookings(session.locale),
+    enabled: Boolean(session.token)
+  });
   const methods = useQuery({
-    queryKey: ["payment-methods", session.locale],
-    queryFn: () => paymentMethods(session.locale === "ko" ? "KR" : "HK", session.locale === "ko" ? "KRW" : "HKD"),
+    queryKey: ["payment-methods", paymentRegion.country, paymentRegion.currency],
+    queryFn: () => paymentMethods(paymentRegion.country, paymentRegion.currency),
     enabled: Boolean(session.token)
   });
 
-  if (classes.isLoading || cards.isLoading) return <Loading />;
+  if (classes.isLoading || cards.isLoading || bookingHistory.isLoading) return <Loading />;
+  if (classes.error || cards.error || bookingHistory.error) {
+    return (
+      <Screen title={t("student")} eyebrow={t("studentStudio")} action={<GhostButton title={t("logout")} onPress={() => void session.logout()} />}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <QueryErrorNotice
+            title={t("studentDataErrorTitle")}
+            message={t("queryErrorMessage")}
+            onRetry={() => void Promise.all([classes.refetch(), cards.refetch(), bookingHistory.refetch()])}
+          />
+        </ScrollView>
+      </Screen>
+    );
+  }
 
-  const activeCard = cards.data?.[0];
+  const activeCard = selectEligibleMemberCard(cards.data ?? []);
   const nextClass = classes.data?.[0];
   const availableClasses = classes.data ?? [];
+  const pendingBookings = pendingBookingsBySession(bookingHistory.data ?? []);
+
+  async function launchCheckout(orderData: Order) {
+    const checkoutRegion = resolveCheckoutPaymentRegion(deviceRegionCode, orderData.currency);
+    const eligibleMethods = checkoutRegion.country === paymentRegion.country
+      && checkoutRegion.currency === paymentRegion.currency
+      && methods.data?.length
+      ? methods.data
+      : await paymentMethods(checkoutRegion.country, checkoutRegion.currency);
+    const methodCode = eligibleMethods.find((method) => method.code === "card")?.code
+      ?? eligibleMethods[0]?.code;
+    if (!methodCode) throw new Error(t("checkoutUnavailable"));
+
+    const checkout = await createCheckoutSession({
+      orderId: orderData.id,
+      country: checkoutRegion.country,
+      currency: checkoutRegion.currency,
+      methodCode,
+      locale: session.locale
+    });
+    const checkoutUrl = checkout.stripe.url;
+    if (!checkoutUrl || !(await Linking.canOpenURL(checkoutUrl))) {
+      throw new Error(t("checkoutUnavailable"));
+    }
+    await Linking.openURL(checkoutUrl);
+  }
+
+  async function bookClass(courseSession: AvailabilitySession) {
+    if (bookingRequestInFlight.current) return;
+
+    bookingRequestInFlight.current = true;
+    setBookingClassId(courseSession.id);
+    let pendingPaymentReference: string | null = null;
+    try {
+      let bookingRows = bookingHistory.data;
+      if (!bookingRows) {
+        const refreshed = await bookingHistory.refetch();
+        bookingRows = refreshed.data;
+      }
+      if (!bookingRows) throw new Error(t("unableToLoadBookings"));
+
+      const existingPendingBooking = bookingRows.find((booking) => (
+        booking.courseSessionId === courseSession.id && booking.status === "pending_payment"
+      ));
+      if (existingPendingBooking) {
+        pendingPaymentReference = existingPendingBooking.orderId ?? existingPendingBooking.id;
+        if (!existingPendingBooking.orderId) throw new Error(t("checkoutUnavailable"));
+        const pendingOrder = await getOrder(existingPendingBooking.orderId);
+        await launchCheckout(pendingOrder);
+        return;
+      }
+
+      const requiredCredits = courseSession.course?.memberCardDeductCount ?? 1;
+      const eligibleCard = selectEligibleMemberCard(cards.data ?? [], requiredCredits);
+      const result = await createBooking(courseSession.id, eligibleCard ? "member_card" : "payment");
+
+      if (eligibleCard) {
+        Alert.alert(t("reserved"), t("reservationConfirmed"));
+      } else {
+        pendingPaymentReference = result.order?.id ?? result.booking.id;
+        if (!result.order?.id) throw new Error(t("checkoutUnavailable"));
+        await launchCheckout(result.order);
+      }
+    } catch (error) {
+      const detail = studentErrorMessage(error, t);
+      if (pendingPaymentReference && apiErrorTranslationKey(error) !== "paymentUnavailable") {
+        Alert.alert(
+          t("paymentPending"),
+          `${t("paymentPendingMessage", { orderId: pendingPaymentReference })}\n\n${detail}`
+        );
+      } else {
+        Alert.alert(t("unableToBook"), detail);
+      }
+    } finally {
+      await Promise.allSettled([classes.refetch(), cards.refetch(), bookingHistory.refetch()]);
+      bookingRequestInFlight.current = false;
+      setBookingClassId(null);
+    }
+  }
 
   return (
     <Screen title={t("student")} eyebrow={t("studentStudio")} action={<GhostButton title={t("logout")} onPress={() => void session.logout()} />}>
@@ -53,103 +178,147 @@ export default function StudentScreen() {
           <View style={styles.membership}>
             <View style={styles.membershipTop}>
               <View>
-                <Text style={styles.membershipEyebrow}>{t("yomiMembership")}</Text>
+                <Text style={styles.membershipEyebrow}>{t("brandMembership")}</Text>
                 <Text style={styles.membershipTitle}>{t("studioPass")}</Text>
               </View>
-              <Pill label={activeCard.status} tone="sage" />
+              <Pill label={t("statusActive")} tone="sage" />
             </View>
             <View style={styles.creditTrack}>
               <View
                 style={[
                   styles.creditFill,
-                  { width: `${Math.max(0, Math.min(100, (activeCard.remainingCredits / activeCard.totalCredits) * 100))}%` }
+                  { width: `${creditPercentage(activeCard.remainingCredits, activeCard.totalCredits)}%` }
                 ]}
               />
             </View>
             <View style={styles.membershipBottom}>
               <Text style={styles.membershipMeta}>{activeCard.remainingCredits}/{activeCard.totalCredits} {t("sessions")}</Text>
-              <Text style={styles.membershipMeta}>{t("validUntil")} {shortDate(activeCard.expiresAt)}</Text>
+              <Text style={styles.membershipMeta}>{t("validUntil")} {shortDate(activeCard.expiresAt, session.locale)}</Text>
             </View>
           </View>
         ) : null}
 
         <SectionHeader title={t("upcomingClasses")} meta={t("classSocialMeta")} />
         <View style={styles.classList}>
-          {availableClasses.map((item, index) => (
-            <ClassCard
-              key={item.id}
-              item={item}
-              featured={index === 0}
-              onBook={async () => {
-                try {
-                  await createBooking(item.id, "member_card");
-                  Alert.alert(t("reserved"), t("reservationConfirmed"));
-                  await Promise.all([classes.refetch(), cards.refetch()]);
-                } catch (error) {
-                  Alert.alert(t("unableToBook"), error instanceof Error ? error.message : "Request failed");
-                }
-              }}
-            />
-          ))}
+          {availableClasses.map((item, index) => {
+            const pendingBooking = pendingBookings.get(item.id);
+            return (
+              <ClassCard
+                key={item.id}
+                item={item}
+                locale={session.locale}
+                featured={index === 0}
+                booking={bookingClassId === item.id}
+                disabled={bookingClassId !== null}
+                pendingPayment={Boolean(pendingBooking)}
+                requiresPayment={Boolean(pendingBooking) || !selectEligibleMemberCard(cards.data ?? [], item.course?.memberCardDeductCount ?? 1)}
+                onBook={() => bookClass(item)}
+              />
+            );
+          })}
         </View>
 
-        <SectionHeader title={t("paymentMethods")} meta={t("paymentRegion")} />
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.methodList}>
-          {(methods.data ?? []).map((method) => (
-            <View key={method.code} style={styles.method}>
-              <Ionicons name={paymentIcon(method.family)} size={20} color={colors.blue} />
-              <Text style={styles.methodName}>{method.display?.[session.locale] ?? method.display?.en ?? method.code}</Text>
-              <Text style={styles.methodCode}>{method.code}</Text>
-            </View>
-          ))}
-        </ScrollView>
+        <SectionHeader
+          title={t("paymentMethods")}
+          meta={t("paymentRegion", paymentRegion)}
+        />
+        {methods.error ? (
+          <QueryErrorNotice
+            title={t("paymentMethodsErrorTitle")}
+            message={t("queryErrorMessage")}
+            onRetry={() => void methods.refetch()}
+          />
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.methodList}>
+            {(methods.data ?? []).map((method) => (
+              <View key={method.code} style={styles.method}>
+                <Ionicons name={paymentIcon(method.family)} size={20} color={colors.blue} />
+                <Text style={styles.methodName}>
+                  {method.display?.[session.locale === "zh-Hans" ? "zh" : session.locale] ?? method.display?.en ?? method.code}
+                </Text>
+                <Text style={styles.methodCode}>{method.code}</Text>
+              </View>
+            ))}
+          </ScrollView>
+        )}
       </ScrollView>
     </Screen>
   );
 }
 
+function studentErrorMessage(error: unknown, t: (key: string) => string) {
+  if (
+    error instanceof Error
+    && [t("checkoutUnavailable"), t("unableToLoadBookings")].includes(error.message)
+  ) {
+    return error.message;
+  }
+  return localizedApiError(error, t);
+}
+
 function ClassCard({
   item,
+  locale,
   featured,
+  booking,
+  disabled,
+  pendingPayment,
+  requiresPayment,
   onBook
 }: {
   item: AvailabilitySession;
+  locale: string;
   featured: boolean;
+  booking: boolean;
+  disabled: boolean;
+  pendingPayment: boolean;
+  requiresPayment: boolean;
   onBook: () => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const { styles } = useStudentTheme();
   const booked = item.participantCount ?? item.participants?.length ?? item.bookedCount;
   const remaining = Math.max(0, item.capacity - booked);
+  const full = remaining === 0;
 
   return (
     <View style={[styles.classCard, featured && styles.classCardFeatured]}>
       <View style={styles.dateRail}>
-        <Text style={[styles.dateDay, featured && styles.lightText]}>{weekday(item.startsAt)}</Text>
+        <Text style={[styles.dateDay, featured && styles.lightText]}>{weekday(item.startsAt, locale)}</Text>
         <Text style={[styles.dateNumber, featured && styles.lightText]}>{dayNumber(item.startsAt)}</Text>
       </View>
       <View style={styles.classBody}>
         <View style={styles.classTop}>
           <View style={styles.classCopy}>
             <Text style={[styles.courseTitle, featured && styles.lightText]}>
-              {String(item.course?.title ?? item.courseId)}
+              {localizedText(item.course?.title, locale, item.courseId)}
             </Text>
             <Text style={[styles.courseMeta, featured && styles.lightMuted]}>
-              {timeRange(item.startsAt, item.endsAt)} · {item.coach?.name ?? item.coachId}
+              {timeRange(item.startsAt, item.endsAt, locale)} · {item.coach?.name ?? item.coachId}
             </Text>
           </View>
-          <Pill label={remaining === 0 ? t("waitlist") : `${remaining} ${t("left")}`} tone={remaining <= 2 ? "coral" : "sage"} />
+          <Pill
+            label={pendingPayment ? t("statusPendingPayment") : full ? t("classFull") : `${remaining} ${t("left")}`}
+            tone={pendingPayment ? "blue" : remaining <= 2 ? "coral" : "sage"}
+          />
         </View>
         <View style={styles.attendeeRow}>
           <AttendeeStrip session={item} featured={featured} />
           <Text style={[styles.joiningText, featured && styles.lightMuted]}>{booked} {t("joining")}</Text>
         </View>
-        <PrimaryButton title={remaining === 0 ? t("joinWaitlist") : t("reserveClass")} onPress={() => void onBook()} icon="arrow-forward" />
+        <PrimaryButton
+          title={booking ? t("pleaseWait") : pendingPayment ? t("retryPayment") : full ? t("classFull") : requiresPayment ? t("reserveAndPay") : t("reserveClass")}
+          onPress={() => void onBook()}
+          disabled={disabled || (full && !pendingPayment)}
+          icon={pendingPayment ? "card-outline" : full ? "close-circle-outline" : "arrow-forward"}
+        />
       </View>
     </View>
   );
 }
 
 function AttendeeStrip({ session, featured }: { session: AvailabilitySession; featured: boolean }) {
+  const { styles } = useStudentTheme();
   const participants = (session.participants ?? []).slice(0, 6);
   const remaining = Math.max(0, (session.participantCount ?? participants.length) - participants.length);
   return (
@@ -165,6 +334,8 @@ function AttendeeStrip({ session, featured }: { session: AvailabilitySession; fe
 }
 
 function Avatar({ person, index, featured }: { person: Participant; index: number; featured: boolean }) {
+  const { colors, styles } = useStudentTheme();
+
   return (
     <View style={[
       styles.avatar,
@@ -180,24 +351,45 @@ function paymentIcon(family: string): "card-outline" | "wallet-outline" {
   return family === "card" ? "card-outline" : "wallet-outline";
 }
 
-function weekday(value: string) {
-  return new Date(value).toLocaleDateString([], { weekday: "short" }).toUpperCase();
+function weekday(value: string, locale: string) {
+  return new Date(value).toLocaleDateString(locale, { weekday: "short" }).toUpperCase();
 }
 
 function dayNumber(value: string) {
   return new Date(value).getDate().toString().padStart(2, "0");
 }
 
-function shortDate(value: string) {
-  return new Date(value).toLocaleDateString([], { month: "short", day: "numeric" });
+function shortDate(value: string, locale: string) {
+  return new Date(value).toLocaleDateString(locale, { month: "short", day: "numeric" });
 }
 
-function timeRange(start: string, end: string) {
+function timeRange(start: string, end: string, locale: string) {
   const options = { hour: "2-digit", minute: "2-digit" } as const;
-  return `${new Date(start).toLocaleTimeString([], options)} – ${new Date(end).toLocaleTimeString([], options)}`;
+  return `${new Date(start).toLocaleTimeString(locale, options)} – ${new Date(end).toLocaleTimeString(locale, options)}`;
 }
 
-const styles = StyleSheet.create({
+function creditPercentage(remaining: number, total: number) {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  return Math.max(0, Math.min(100, (remaining / total) * 100));
+}
+
+function localizedText(value: string | LocalizedText | undefined, locale: string, fallback: string) {
+  if (typeof value === "string") return value;
+  if (!value) return fallback;
+  const localized = value as Record<string, string | undefined>;
+  return localized[locale]
+    ?? (locale === "zh-Hans" ? localized.zh : undefined)
+    ?? localized.en
+    ?? fallback;
+}
+
+function useStudentTheme() {
+  const { colors } = useTheme();
+  return { colors, styles: useThemedStyles(createStyles) };
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.xl },
   welcome: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end", gap: spacing.md },
   greeting: { color: colors.muted, fontSize: 14 },
@@ -207,12 +399,12 @@ const styles = StyleSheet.create({
   metricRow: { flexDirection: "row", gap: spacing.sm },
   membership: { backgroundColor: colors.black, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.lg },
   membershipTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
-  membershipEyebrow: { color: "#AAB8AF", fontSize: 10, fontWeight: "800" },
+  membershipEyebrow: { color: colors.onDarkSubtle, fontSize: 10, fontWeight: "800" },
   membershipTitle: { color: colors.white, fontSize: 23, fontWeight: "800", marginTop: spacing.xs },
-  creditTrack: { height: 6, borderRadius: 999, overflow: "hidden", backgroundColor: "#3A403D" },
+  creditTrack: { height: 6, borderRadius: 999, overflow: "hidden", backgroundColor: colors.progressTrack },
   creditFill: { height: "100%", backgroundColor: colors.coral, borderRadius: 999 },
   membershipBottom: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm },
-  membershipMeta: { color: "#C8CECA", fontSize: 11 },
+  membershipMeta: { color: colors.onDarkMuted, fontSize: 11 },
   classList: { gap: spacing.md },
   classCard: { flexDirection: "row", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, overflow: "hidden" },
   classCardFeatured: { backgroundColor: colors.accentDark, borderColor: colors.accentDark },
@@ -225,7 +417,7 @@ const styles = StyleSheet.create({
   courseTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
   courseMeta: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: spacing.xs },
   lightText: { color: colors.white },
-  lightMuted: { color: "#C5D0C9" },
+  lightMuted: { color: colors.onAccentMuted },
   attendeeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   attendeeStrip: { flexDirection: "row", alignItems: "center", minHeight: 34 },
   avatar: { width: 34, height: 34, borderRadius: 17, borderWidth: 2, borderColor: colors.surface, alignItems: "center", justifyContent: "center" },
@@ -238,4 +430,5 @@ const styles = StyleSheet.create({
   method: { width: 142, minHeight: 112, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, padding: spacing.md, justifyContent: "space-between" },
   methodName: { color: colors.text, fontWeight: "800", fontSize: 13 },
   methodCode: { color: colors.muted, fontSize: 10, textTransform: "uppercase" }
-});
+  });
+}

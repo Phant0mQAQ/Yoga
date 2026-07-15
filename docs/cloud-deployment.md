@@ -1,4 +1,4 @@
-# Yomi Yoga Cloud Deployment
+# Good Vibe Pilates & Yoga Cloud Deployment
 
 The production topology is:
 
@@ -58,7 +58,7 @@ Create an empty private GitHub repository, then run:
 ```powershell
 git init
 git add .
-git commit -m "Prepare Yomi Yoga cloud release"
+git commit -m "Prepare Good Vibe Pilates & Yoga cloud release"
 git branch -M main
 git remote add origin https://github.com/YOUR_ACCOUNT/YOUR_REPOSITORY.git
 git push -u origin main
@@ -99,6 +99,7 @@ APP_SECRET=<at least 32 random characters>
 CORS_ALLOWED_ORIGINS=https://YOUR_VERCEL_DOMAIN
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_SECRET_KEY=<Supabase server secret>
+SUPABASE_STORAGE_BUCKET=<pre-created public bucket name, without slashes>
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_PUBLISHABLE_KEY=pk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
@@ -106,6 +107,14 @@ STRIPE_MERCHANT_IDENTIFIER=merchant.com.yomiyoga.studio
 INITIAL_ADMIN_EMAIL=<private administrator email>
 INITIAL_ADMIN_PASSWORD=<unique password, at least 12 characters>
 ```
+
+Create `SUPABASE_STORAGE_BUCKET` in Supabase before enabling it and mark the
+bucket **public**, because stored content is served through
+`/storage/v1/object/public/...`. The API uses the server secret only to create
+two-hour signed upload URLs; the admin client uploads the raw file directly
+with HTTP `PUT`. If the variable is absent, production startup continues with
+a warning, but upload requests return `storage_not_configured` instead of
+claiming that an in-memory Render upload is durable.
 
 Before App Store production, change the Blueprint to `NODE_ENV=production`,
 use a paid always-on instance, restrict `CORS_ALLOWED_ORIGINS`, and configure
@@ -141,6 +150,9 @@ Subscribe to:
 payment_intent.succeeded
 payment_intent.payment_failed
 checkout.session.completed
+checkout.session.async_payment_succeeded
+checkout.session.async_payment_failed
+checkout.session.expired
 charge.refunded
 refund.updated
 ```
@@ -160,7 +172,7 @@ The current admin is a static application, not Next.js. In Vercel:
 5. Add:
 
 ```text
-YOMI_API_BASE_URL=https://YOUR_RENDER_SERVICE.onrender.com/api/v1
+GOOD_VIBE_API_BASE_URL=https://YOUR_RENDER_SERVICE.onrender.com/api/v1
 ```
 
 6. Deploy.

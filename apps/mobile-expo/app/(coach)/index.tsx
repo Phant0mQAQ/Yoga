@@ -3,13 +3,18 @@ import { useQuery } from "@tanstack/react-query";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { bookings } from "@/api/client";
-import { GhostButton, Loading, Metric, Pill, Screen, SectionHeader } from "@/components/ui";
+import type { Booking, LocalizedText } from "@/api/types";
+import { GhostButton, Loading, Metric, Pill, QueryErrorNotice, Screen, SectionHeader } from "@/components/ui";
 import { useSession } from "@/state/session";
-import { colors, radius, spacing } from "@/theme/tokens";
+import { useTheme, useThemedStyles } from "@/state/theme";
+import { radius, spacing } from "@/theme/tokens";
+import type { ThemeColors } from "@/theme/tokens";
 
 export default function CoachScreen() {
   const { t } = useTranslation();
   const session = useSession();
+  const { colors } = useTheme();
+  const styles = useThemedStyles(createStyles);
   const query = useQuery({
     queryKey: ["coach-bookings", session.locale],
     queryFn: () => bookings(session.locale),
@@ -17,6 +22,19 @@ export default function CoachScreen() {
   });
 
   if (query.isLoading) return <Loading />;
+  if (query.error) {
+    return (
+      <Screen title={t("coach")} eyebrow={t("coachWorkspace")} action={<GhostButton title={t("logout")} onPress={() => void session.logout()} />}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <QueryErrorNotice
+            title={t("coachDataErrorTitle")}
+            message={t("queryErrorMessage")}
+            onRetry={() => void query.refetch()}
+          />
+        </ScrollView>
+      </Screen>
+    );
+  }
 
   const rows = query.data ?? [];
   const confirmed = rows.filter((booking) => booking.status === "confirmed").length;
@@ -26,7 +44,7 @@ export default function CoachScreen() {
     <Screen title={t("coach")} eyebrow={t("coachWorkspace")} action={<GhostButton title={t("logout")} onPress={() => void session.logout()} />}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <View>
-          <Text style={styles.kicker}>{t("todayAtYomi")}</Text>
+          <Text style={styles.kicker}>{t("todayAtGoodVibe")}</Text>
           <Text style={styles.heading}>{t("teachingDay")}</Text>
         </View>
 
@@ -57,10 +75,10 @@ export default function CoachScreen() {
               </View>
               <View style={styles.bookingCard}>
                 <View style={styles.bookingTop}>
-                  <Text style={styles.bookingTime}>{formatTime(booking.startsAt)}</Text>
-                  <Pill label={booking.status} tone={booking.status === "checked_in" ? "sage" : "blue"} />
+                  <Text style={styles.bookingTime}>{formatTime(booking.startsAt, session.locale)}</Text>
+                  <Pill label={t(bookingStatusKey(booking.status))} tone={bookingStatusTone(booking.status)} />
                 </View>
-                <Text style={styles.bookingTitle}>{String(booking.course?.title ?? booking.courseId)}</Text>
+                <Text style={styles.bookingTitle}>{localizedText(booking.course?.title, session.locale, booking.courseId)}</Text>
                 <View style={styles.bookingMeta}>
                   <Ionicons name="person-circle-outline" size={17} color={colors.muted} />
                   <Text style={styles.bookingMetaText}>{booking.user?.name ?? t("studentBooking")}</Text>
@@ -75,11 +93,35 @@ export default function CoachScreen() {
   );
 }
 
-function formatTime(value: string) {
-  return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+function formatTime(value: string, locale: string) {
+  return new Date(value).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 }
 
-const styles = StyleSheet.create({
+function bookingStatusKey(status: Booking["status"]) {
+  if (status === "pending_payment") return "statusPendingPayment" as const;
+  if (status === "confirmed") return "statusConfirmed" as const;
+  if (status === "cancelled") return "statusCancelled" as const;
+  return "statusCheckedIn" as const;
+}
+
+function bookingStatusTone(status: Booking["status"]): "sage" | "blue" | "neutral" {
+  if (status === "pending_payment") return "blue";
+  if (status === "cancelled") return "neutral";
+  return "sage";
+}
+
+function localizedText(value: string | LocalizedText | undefined, locale: string, fallback: string) {
+  if (typeof value === "string") return value;
+  if (!value) return fallback;
+  const localized = value as Record<string, string | undefined>;
+  return localized[locale]
+    ?? (locale === "zh-Hans" ? localized.zh : undefined)
+    ?? localized.en
+    ?? fallback;
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   scroll: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.xl },
   kicker: { color: colors.coral, fontSize: 10, fontWeight: "800" },
   heading: { color: colors.text, fontSize: 30, lineHeight: 36, fontWeight: "800", marginTop: spacing.xs, maxWidth: 330 },
@@ -103,4 +145,5 @@ const styles = StyleSheet.create({
   bookingMeta: { flexDirection: "row", alignItems: "center", gap: spacing.xs, marginTop: spacing.sm },
   bookingMetaText: { color: colors.muted, fontSize: 12 },
   empty: { color: colors.muted, textAlign: "center", paddingVertical: spacing.xxl }
-});
+  });
+}

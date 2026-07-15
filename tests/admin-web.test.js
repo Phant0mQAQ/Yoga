@@ -5,6 +5,7 @@ import vm from "node:vm";
 const html = fs.readFileSync("apps/admin/index.html", "utf8");
 const script = fs.readFileSync("apps/admin/app.js", "utf8");
 const config = fs.readFileSync("apps/admin/build.mjs", "utf8");
+const sourceConfig = fs.readFileSync("apps/admin/config.js", "utf8");
 
 assert.match(html, /<meta charset="utf-8">/);
 assert.match(html, /<option value="zh-Hans">简体中文<\/option>/);
@@ -52,6 +53,7 @@ assert.equal(
   "API calls must be relative to the configured /api/v1 base URL"
 );
 assert.match(config, /endsWith\("\/api\/v1"\)/);
+assert.match(sourceConfig, /apiBaseUrl:\s*"\/api\/v1"/);
 assert.match(html, /id="themeBtn"/);
 assert.match(html, /id="logoutBtn"/);
 assert.equal([...html.matchAll(/data-view="([^"]+)"/g)].length, 6);

@@ -12,4 +12,4 @@ revoke all on table public.yomi_app_state from anon;
 revoke all on table public.yomi_app_state from authenticated;
 
 comment on table public.yomi_app_state is
-  'Server-only persistence for the Yomi Yoga API compatibility migration.';
+  'Server-only persistence for the Good Vibe Pilates & Yoga API compatibility migration.';

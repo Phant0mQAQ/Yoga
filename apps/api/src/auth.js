@@ -39,6 +39,22 @@ export function verifyToken(token, store, secret = process.env.APP_SECRET ?? DEF
   if (!session || session.revokedAt) {
     throw problem(401, "session_revoked", "Session is not active");
   }
+  if (
+    decoded.sub !== session.userId
+    || decoded.active_role !== session.activeRole
+  ) {
+    throw problem(401, "invalid_token", "Token does not match its role session");
+  }
+  if (session.expiresAt && new Date(session.expiresAt).getTime() <= Date.now()) {
+    throw problem(401, "expired_token", "Role session has expired");
+  }
+  const user = store.users.find((item) => item.id === session.userId);
+  if (!user) {
+    throw problem(401, "session_revoked", "Session user no longer exists");
+  }
+  if (!user.roles.includes(session.activeRole)) {
+    throw problem(401, "role_revoked", "The active role is no longer assigned to this user");
+  }
   return {
     sessionId: session.id,
     userId: session.userId,

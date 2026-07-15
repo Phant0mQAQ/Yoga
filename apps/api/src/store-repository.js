@@ -117,7 +117,7 @@ function createSupabaseRepository({ supabaseUrl, secretKey, fetchImpl }) {
 
 function mergeStore(seedStore, persistedStore) {
   if (!persistedStore || typeof persistedStore !== "object" || Array.isArray(persistedStore)) {
-    throw new Error("Supabase contains an invalid Yomi Yoga state document");
+    throw new Error("Supabase contains an invalid Good Vibe Pilates & Yoga state document");
   }
   return Object.fromEntries(
     Object.entries(seedStore).map(([key, seedValue]) => {

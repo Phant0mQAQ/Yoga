@@ -1,13 +1,13 @@
 {
-  "name": "yoga-booking-system",
+  "name": "good-vibe-pilates-yoga",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Lightweight iOS yoga booking and management system foundation.",
+  "description": "Good Vibe Pilates & Yoga booking and studio management system.",
   "scripts": {
     "start": "node apps/api/server.js",
     "start:supabase": "node --env-file=.env apps/api/server.js",
-    "test": "node tests/domain.test.js && node tests/admin-web.test.js && node tests/store-repository.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
+    "test": "node tests/brand.test.js && node tests/domain.test.js && node tests/financial-invariants.test.js && node tests/admin-web.test.js && node tests/admin-ui-regressions.test.js && node tests/store-repository.test.js && node tests/storage-provider.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
     "preflight": "node scripts/release-preflight.mjs",
     "preflight:cloud": "node scripts/release-preflight.mjs --cloud"
   },
