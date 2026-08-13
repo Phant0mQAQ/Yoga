@@ -3,7 +3,7 @@
     "name": "Good Vibe Pilates & Yoga",
     "slug": "good-vibe-pilates-yoga",
     "scheme": "goodvibe",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/good-vibe-icon.png",

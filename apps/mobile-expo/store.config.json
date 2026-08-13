@@ -23,7 +23,7 @@
           "schedule",
           "studio"
         ],
-        "releaseNotes": "Welcome to Good Vibe Pilates & Yoga. This first release includes course discovery and booking, membership management, role-based studio operations, English, Chinese and Korean support, and dark mode.",
+        "releaseNotes": "This update improves the sign-in experience on modern iPhones, including safer screen-edge spacing, smoother keyboard resizing, and more reliable form scrolling.",
         "privacyPolicyUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/privacy",
         "supportUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/support"
       },
@@ -44,7 +44,7 @@
           "排课",
           "工作室"
         ],
-        "releaseNotes": "欢迎使用 Good Vibe Pilates & Yoga。首个版本提供课程浏览与预约、会员管理、基于角色的门店运营功能、中英韩三语和深色模式。",
+        "releaseNotes": "本次更新优化了现代 iPhone 上的登录体验，包括更合理的安全区域间距、更流畅的键盘适配，以及更稳定的表单滚动。",
         "privacyPolicyUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/privacy",
         "supportUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/support"
       },
@@ -64,7 +64,7 @@
           "스케줄",
           "스튜디오"
         ],
-        "releaseNotes": "Good Vibe Pilates & Yoga의 첫 번째 버전입니다. 수업 탐색과 예약, 회원권 관리, 역할별 스튜디오 운영, 영어, 중국어, 한국어 및 다크 모드를 제공합니다.",
+        "releaseNotes": "이번 업데이트에서는 최신 iPhone의 로그인 환경을 개선했습니다. 안전 영역 간격, 키보드 크기 조정 및 양식 스크롤이 더 안정적으로 동작합니다.",
         "privacyPolicyUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/privacy",
         "supportUrl": "https://good-vibe-pilates-yoga.2316196563.workers.dev/support"
       }
@@ -87,7 +87,7 @@
       "seventeenPlus": false
     },
     "release": {
-      "automaticRelease": false,
+      "automaticRelease": true,
       "phasedRelease": false
     }
   }
