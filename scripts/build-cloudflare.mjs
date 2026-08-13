@@ -1,13 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const output = path.join(root, ".cloudflare", "public");
 const mobileExpoRoot = path.join(root, "apps", "mobile-expo");
 const mobileExpoOutput = path.join(root, ".cloudflare", "mobile-expo-web");
-const expoCli = path.join(mobileExpoRoot, "node_modules", "expo", "bin", "cli");
+const mobileRequire = createRequire(path.join(mobileExpoRoot, "package.json"));
+const expoCli = mobileRequire.resolve("expo/bin/cli");
 
 fs.rmSync(mobileExpoOutput, { recursive: true, force: true });
 execFileSync(process.execPath, [

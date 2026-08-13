@@ -17,6 +17,11 @@ assert.equal(
   "wrangler deploy",
   "The deployment script must rely on Wrangler's shared custom build step"
 );
+assert.deepEqual(
+  packageJson.workspaces,
+  ["apps/admin", "apps/mobile-expo"],
+  "Cloudflare clean installs must include the Expo application dependencies"
+);
 assert.equal(
   config.vars?.AUTH_PROVIDER,
   "local",

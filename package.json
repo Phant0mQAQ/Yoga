@@ -2,6 +2,10 @@
   "name": "good-vibe-pilates-yoga",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/admin",
+    "apps/mobile-expo"
+  ],
   "type": "module",
   "description": "Good Vibe Pilates & Yoga booking and studio management system.",
   "scripts": {
