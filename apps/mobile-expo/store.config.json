@@ -1,6 +1,7 @@
 {
   "configVersion": 0,
   "apple": {
+    "version": "1.0.1",
     "categories": [
       "HEALTH_AND_FITNESS",
       "LIFESTYLE"
@@ -70,11 +71,15 @@
       }
     },
     "advisory": {
+      "ageRatingOverride": "NONE",
       "alcoholTobaccoOrDrugUseOrReferences": "NONE",
       "contests": "NONE",
       "gambling": false,
       "gamblingSimulated": "NONE",
       "horrorOrFearThemes": "NONE",
+      "kidsAgeBand": null,
+      "koreaAgeRatingOverride": "NONE",
+      "lootBox": false,
       "matureOrSuggestiveThemes": "NONE",
       "medicalOrTreatmentInformation": "NONE",
       "profanityOrCrudeHumor": "NONE",
@@ -84,7 +89,16 @@
       "violenceCartoonOrFantasy": "NONE",
       "violenceRealistic": "NONE",
       "violenceRealisticProlongedGraphicOrSadistic": "NONE",
-      "seventeenPlus": false
+      "seventeenPlus": false,
+      "advertising": false,
+      "ageAssurance": false,
+      "ageRatingOverrideV2": "NONE",
+      "developerAgeRatingInfoUrl": null,
+      "gunsOrOtherWeapons": "NONE",
+      "healthOrWellnessTopics": true,
+      "messagingAndChat": false,
+      "parentalControls": false,
+      "userGeneratedContent": false
     },
     "release": {
       "automaticRelease": true,
