@@ -390,7 +390,8 @@ function createUiTheme(colors: ThemeColors) {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: spacing.md
+    gap: spacing.md,
+    zIndex: 100
   },
   brandRow: {
     minWidth: 0,
@@ -411,7 +412,8 @@ function createUiTheme(colors: ThemeColors) {
   headerActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs
+    gap: spacing.xs,
+    zIndex: 110
   },
   appearanceControls: {
     flexDirection: "row",

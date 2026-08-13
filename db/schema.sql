@@ -63,6 +63,7 @@ CREATE TABLE courses (
   category_id uuid REFERENCES course_categories(id),
   title jsonb NOT NULL,
   description jsonb NOT NULL DEFAULT '{}',
+  image_url text,
   duration_minutes integer NOT NULL CHECK (duration_minutes > 0),
   price_amount integer NOT NULL CHECK (price_amount >= 0),
   currency char(3) NOT NULL,

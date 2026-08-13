@@ -1,0 +1,20 @@
+services:
+  api:
+    image: ${API_IMAGE:?Set API_IMAGE to the ACR image URL and tag}
+    container_name: good-vibe-api
+    restart: unless-stopped
+    env_file:
+      - ${API_ENV_FILE:-.env.alibaba}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

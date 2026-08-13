@@ -16,12 +16,41 @@ const errors = (transpiled.diagnostics ?? []).filter((diagnostic) => diagnostic.
 assert.equal(errors.length, 0, errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")).join("\n"));
 
 const {
+  countBookableSessions,
+  countUpcomingBookings,
+  isSessionBookable,
   parseBookingIdFromQr,
   pendingBookingsBySession,
   resolveCheckoutPaymentRegion,
   resolvePaymentRegion,
   selectEligibleMemberCard
 } = await import(`data:text/javascript;base64,${Buffer.from(transpiled.outputText).toString("base64")}`);
+
+test("bookable class metrics exclude full, closed, and past sessions", () => {
+  const now = Date.parse("2026-07-26T00:00:00.000Z");
+  const sessions = [
+    { status: "open", startsAt: "2026-07-27T00:00:00.000Z", capacity: 8, participantCount: 2 },
+    { status: "open", startsAt: "2026-07-27T00:00:00.000Z", capacity: 1, participantCount: 1 },
+    { status: "closed", startsAt: "2026-07-27T00:00:00.000Z", capacity: 8, participantCount: 0 },
+    { status: "open", startsAt: "2026-07-25T00:00:00.000Z", capacity: 8, participantCount: 0 }
+  ];
+
+  assert.equal(isSessionBookable(sessions[0], now), true);
+  assert.equal(isSessionBookable(sessions[1], now), false);
+  assert.equal(countBookableSessions(sessions, now), 1);
+});
+
+test("booking metrics count only the current user's active upcoming bookings", () => {
+  const now = Date.parse("2026-07-26T00:00:00.000Z");
+  const bookings = [
+    { status: "confirmed", endsAt: "2026-07-27T00:00:00.000Z" },
+    { status: "checked_in", endsAt: "2026-07-27T00:00:00.000Z" },
+    { status: "cancelled", endsAt: "2026-07-27T00:00:00.000Z" },
+    { status: "confirmed", endsAt: "2026-07-25T00:00:00.000Z" }
+  ];
+
+  assert.equal(countUpcomingBookings(bookings, now), 2);
+});
 
 const tokenSource = readFileSync(new URL("../src/theme/tokens.ts", import.meta.url), "utf8");
 const tokenTranspiled = ts.transpileModule(tokenSource, {
@@ -75,6 +104,7 @@ test("selectEligibleMemberCard ignores inactive, expired, and insufficient cards
 });
 
 test("resolvePaymentRegion uses the device region rather than a language", () => {
+  assert.deepEqual(resolvePaymentRegion(undefined), { country: "US", currency: "USD" });
   assert.deepEqual(resolvePaymentRegion("kr"), { country: "KR", currency: "KRW" });
   assert.deepEqual(resolvePaymentRegion("HK"), { country: "HK", currency: "HKD" });
   assert.deepEqual(resolvePaymentRegion("DE"), { country: "DE", currency: "EUR" });
@@ -102,8 +132,8 @@ test("parseBookingIdFromQr supports raw IDs, JSON, and URLs", () => {
   assert.equal(parseBookingIdFromQr('{"bookingId":"bkg_json_123"}'), "bkg_json_123");
   assert.equal(parseBookingIdFromQr('{"booking":{"id":"bkg_nested_123"}}'), "bkg_nested_123");
   assert.equal(parseBookingIdFromQr("goodvibe://check-in?bookingId=bkg_url_123"), "bkg_url_123");
-  assert.equal(parseBookingIdFromQr("yomiyoga://booking/bkg_host_123"), "bkg_host_123");
-  assert.equal(parseBookingIdFromQr("yomiyoga://bookings/bkg_hosts_123"), "bkg_hosts_123");
+  assert.equal(parseBookingIdFromQr("goodvibe://booking/bkg_host_123"), "bkg_host_123");
+  assert.equal(parseBookingIdFromQr("goodvibe://bookings/bkg_hosts_123"), "bkg_hosts_123");
   assert.equal(parseBookingIdFromQr("https://example.com/bookings/bkg_path_123/check-in"), "bkg_path_123");
   assert.equal(parseBookingIdFromQr("https://example.com/?id=bkg_untrusted_123"), null);
   assert.equal(parseBookingIdFromQr("not a booking id"), null);

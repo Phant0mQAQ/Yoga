@@ -7,12 +7,14 @@ import { getFreePort } from "./test-port.js";
 const databasePort = await getFreePort();
 const apiPort = await getFreePort();
 let stateRow = null;
+let databaseReadCount = 0;
 
 const database = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname !== "/rest/v1/yomi_app_state") return json(res, 404, { message: "not found" });
+  if (url.pathname !== "/rest/v1/good_vibe_app_state") return json(res, 404, { message: "not found" });
 
   if (req.method === "GET") {
+    databaseReadCount += 1;
     return json(res, 200, stateRow ? [{ state: stateRow.state, version: stateRow.version }] : []);
   }
   if (req.method === "POST") {
@@ -41,7 +43,7 @@ try {
     expectStatus: 401,
     body: {
       email: "admin@example.com",
-      password: "Yomi@2026",
+      password: "GoodVibe@2026",
       role: "admin",
       locale: "en"
     }
@@ -51,7 +53,7 @@ try {
   const adminLogin = await api("/auth/login", {
     method: "POST",
     body: {
-      email: "owner@yomiyoga.test",
+      email: "owner@goodvibe.test",
       password: "UniqueProductionPassword!",
       role: "admin",
       locale: "en"
@@ -59,6 +61,18 @@ try {
   });
   assert.equal(adminLogin.user.id, "usr_admin");
   assert.equal(stateRow.state.authIdentities.length, 1);
+
+  const readsBeforeCachedRequests = databaseReadCount;
+  await Promise.all([
+    api("/payments/methods?scope=all"),
+    api("/payments/methods?scope=all"),
+    api("/payments/methods?scope=all")
+  ]);
+  assert.equal(
+    databaseReadCount,
+    readsBeforeCachedRequests,
+    "concurrent read requests should reuse the freshly cached store"
+  );
 
   console.log("production startup tests passed");
 } finally {
@@ -76,16 +90,21 @@ function startApi() {
       ...process.env,
       NODE_ENV: "production",
       PORT: String(apiPort),
-      APP_BASE_URL: "https://api.yomiyoga.test",
+      APP_BASE_URL: "https://api.goodvibe.test",
       APP_SECRET: "test-secret-with-more-than-32-characters",
       SUPABASE_URL: `http://127.0.0.1:${databasePort}`,
       SUPABASE_SECRET_KEY: "sb_secret_test",
       STRIPE_SECRET_KEY: "sk_test_placeholder",
       STRIPE_PUBLISHABLE_KEY: "pk_test_placeholder",
       STRIPE_WEBHOOK_SECRET: "whsec_placeholder",
-      STRIPE_MERCHANT_IDENTIFIER: "merchant.com.yomiyoga.studio",
-      INITIAL_ADMIN_EMAIL: "owner@yomiyoga.test",
-      INITIAL_ADMIN_PASSWORD: "UniqueProductionPassword!"
+      STRIPE_MERCHANT_IDENTIFIER: "merchant.com.goodvibe.pilatesyoga",
+      COACH_INVITE_CODE: "test-coach-invite-2026",
+      INITIAL_ADMIN_EMAIL: "owner@goodvibe.test",
+      INITIAL_ADMIN_PASSWORD: "UniqueProductionPassword!",
+      LEGAL_OPERATOR_NAME: "Good Vibe Pilates & Yoga LLC",
+      LEGAL_POSTAL_ADDRESS: "123 Test Street, San Francisco, CA 94105",
+      PRIVACY_EMAIL: "privacy@goodvibe.test",
+      SUPPORT_EMAIL: "support@goodvibe.test"
     },
     stdio: ["ignore", "pipe", "pipe"]
   });

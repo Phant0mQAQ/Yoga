@@ -10,7 +10,7 @@ let stateRow = null;
 
 const supabase = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
-  if (url.pathname !== "/rest/v1/yomi_app_state") {
+  if (url.pathname !== "/rest/v1/good_vibe_app_state") {
     return json(res, 404, { message: "not found" });
   }
 
@@ -43,6 +43,18 @@ try {
   await waitForHealth();
   const health = await api("/health", { base: `http://127.0.0.1:${API_PORT}` });
   assert.equal(health.database, "supabase");
+
+  const slowMutation = openSlowMutation();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  const loginWhileAnotherBodyIsIncomplete = await Promise.race([
+    loginStudent(),
+    new Promise((_, reject) => setTimeout(
+      () => reject(new Error("A partial request body blocked an unrelated login")),
+      2_000
+    ))
+  ]);
+  assert.equal(loginWhileAnotherBodyIsIncomplete.user.id, "usr_student");
+  slowMutation.destroy();
 
   const student = await loginStudent();
   await api("/bookings", {
@@ -81,6 +93,23 @@ function startApi() {
   });
 }
 
+function openSlowMutation() {
+  const request = http.request({
+    hostname: "127.0.0.1",
+    port: API_PORT,
+    path: "/api/v1/auth/login",
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Length": "200"
+    }
+  });
+  request.on("error", () => {});
+  request.flushHeaders();
+  request.write('{"email":"unfinished@example.com"');
+  return request;
+}
+
 async function stopApi() {
   if (!apiServer || apiServer.exitCode !== null) return;
   apiServer.kill();
@@ -92,7 +121,7 @@ async function loginStudent() {
     method: "POST",
     body: {
       email: "student@example.com",
-      password: "Yomi@2026",
+      password: "GoodVibe@2026",
       role: "student",
       locale: "en"
     }

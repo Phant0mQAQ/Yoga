@@ -8,9 +8,9 @@
 - Primary Category：Health & Fitness
 - Secondary Category：Lifestyle
 - Copyright：`2026 [CLIENT LEGAL ENTITY]`
-- Privacy Policy URL：`https://[CLIENT DOMAIN]/privacy`
-- Support URL：`https://[CLIENT DOMAIN]/support`
-- Marketing URL：`https://[CLIENT DOMAIN]`（可选）
+- Privacy Policy URL：`https://good-vibe-pilates-yoga.2316196563.workers.dev/privacy`
+- Support URL：`https://good-vibe-pilates-yoga.2316196563.workers.dev/support`
+- Marketing URL：可选；自有品牌域名上线后再填写
 
 ## English (U.S.)
 

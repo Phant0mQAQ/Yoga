@@ -7,6 +7,8 @@ export const ROLES = Object.freeze({
   ADMIN: "admin"
 });
 
+export const FIXED_ADMIN_USER_ID = "usr_admin";
+
 export const BOOKING_STATUS = Object.freeze({
   PENDING_PAYMENT: "pending_payment",
   CONFIRMED: "confirmed",
@@ -30,7 +32,7 @@ const EU_COUNTRIES = new Set([
   "HU", "IE", "IT", "LT", "LU", "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"
 ]);
 
-export const DEMO_PASSWORD = "Yomi@2026";
+export const DEMO_PASSWORD = "GoodVibe@2026";
 
 export function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
   const derivedKey = crypto.scryptSync(String(password), salt, 64).toString("hex");
@@ -50,16 +52,7 @@ export const PAYMENT_METHODS = Object.freeze([
   {
     code: "card",
     family: "card",
-    display: { en: "International Cards", zh: "国际银行卡", ko: "해외 카드" },
-    currencies: ["*"],
-    countries: ["*"],
-    flow: "native_or_checkout",
-    recurring: true
-  },
-  {
-    code: "link",
-    family: "wallet",
-    display: { en: "Link", zh: "Link 快捷支付", ko: "Link" },
+    display: { en: "Cards", zh: "银行卡", ko: "카드" },
     currencies: ["*"],
     countries: ["*"],
     flow: "native_or_checkout",
@@ -79,7 +72,7 @@ export const PAYMENT_METHODS = Object.freeze([
     family: "local_wallet",
     display: { en: "Alipay", zh: "支付宝", ko: "Alipay" },
     currencies: ["AUD", "CAD", "CNY", "EUR", "GBP", "HKD", "JPY", "MYR", "NZD", "SGD", "USD"],
-    countries: ["CN", "HK", "SG", "US", "GB", "EU"],
+    countries: ["CN", "HK", "SG", "GB", "EU"],
     flow: "redirect",
     recurring: false
   },
@@ -88,18 +81,9 @@ export const PAYMENT_METHODS = Object.freeze([
     family: "local_wallet",
     display: { en: "WeChat Pay", zh: "微信支付", ko: "WeChat Pay" },
     currencies: ["AUD", "CAD", "CHF", "CNY", "DKK", "EUR", "GBP", "HKD", "JPY", "NOK", "SEK", "SGD", "USD"],
-    countries: ["CN", "HK", "SG", "US", "GB", "EU"],
+    countries: ["CN", "HK", "SG", "GB", "EU"],
     flow: "checkout_redirect",
     recurring: false
-  },
-  {
-    code: "kr_card",
-    family: "card",
-    display: { en: "Korean Cards", zh: "韩国本地银行卡", ko: "국내 카드" },
-    currencies: ["KRW"],
-    countries: ["KR"],
-    flow: "redirect",
-    recurring: true
   },
   {
     code: "kakao_pay",
@@ -151,7 +135,7 @@ export function createSeedStore() {
         id: "usr_student",
         name: "Mia Chen",
         email: "student@example.com",
-        phone: "+85250000001",
+        phone: "+14155550101",
         locale: "en",
         roles: [ROLES.STUDENT],
         createdAt: now.toISOString()
@@ -160,7 +144,7 @@ export function createSeedStore() {
         id: "usr_coach",
         name: "Sora Kim",
         email: "coach@example.com",
-        phone: "+85250000002",
+        phone: "+14155550102",
         locale: "ko",
         roles: [ROLES.COACH],
         createdAt: now.toISOString()
@@ -169,7 +153,7 @@ export function createSeedStore() {
         id: "usr_staff",
         name: "Studio Staff",
         email: "staff@example.com",
-        phone: "+85250000003",
+        phone: "+14155550103",
         locale: "en",
         roles: [ROLES.STAFF],
         createdAt: now.toISOString()
@@ -178,7 +162,7 @@ export function createSeedStore() {
         id: "usr_admin",
         name: "Admin",
         email: "admin@example.com",
-        phone: "+85250000004",
+        phone: "+14155550104",
         locale: "zh-Hans",
         roles: [ROLES.ADMIN],
         createdAt: now.toISOString()
@@ -190,6 +174,7 @@ export function createSeedStore() {
       { id: "aid_staff_email", userId: "usr_staff", type: "email", value: "staff@example.com", passwordHash: demoPasswordHash, verifiedAt: now.toISOString() },
       { id: "aid_admin_email", userId: "usr_admin", type: "email", value: "admin@example.com", passwordHash: demoPasswordHash, verifiedAt: now.toISOString() }
     ],
+    emailVerificationChallenges: [],
     roleSessions: [],
     courseCategories: [
       { id: "cat_group", title: tr("Group Yoga", "团体瑜伽", "그룹 요가") },
@@ -211,11 +196,12 @@ export function createSeedStore() {
       {
         id: "course_flow",
         categoryId: "cat_group",
+        active: true,
         title: tr("Morning Flow", "晨间流瑜伽", "모닝 플로우"),
         description: tr("A balanced vinyasa class for all levels.", "适合各水平的流瑜伽课程。", "모든 레벨을 위한 빈야사 수업입니다."),
         durationMinutes: 60,
-        priceAmount: 38000,
-        currency: "KRW",
+        priceAmount: 3800,
+        currency: "USD",
         capacity: 8,
         memberCardDeductCount: 1,
         tags: ["vinyasa", "mobility"]
@@ -223,11 +209,12 @@ export function createSeedStore() {
       {
         id: "course_private",
         categoryId: "cat_private",
+        active: true,
         title: tr("Private Alignment", "私教体态矫正", "개인 자세 교정"),
         description: tr("One-on-one class with posture assessment.", "一对一体态评估与练习。", "자세 평가가 포함된 1:1 레슨입니다."),
         durationMinutes: 75,
-        priceAmount: 88000,
-        currency: "KRW",
+        priceAmount: 8800,
+        currency: "USD",
         capacity: 1,
         memberCardDeductCount: 2,
         tags: ["private", "alignment"]
@@ -261,7 +248,7 @@ export function createSeedStore() {
         coachId: "coach_sora",
         startsAt: tomorrow.toISOString(),
         endsAt: new Date(tomorrow.getTime() + 8 * 60 * 60 * 1000).toISOString(),
-        timezone: "Asia/Hong_Kong"
+        timezone: "America/Los_Angeles"
       }
     ],
     bookings: [],
@@ -271,9 +258,12 @@ export function createSeedStore() {
         id: "plan_10",
         title: tr("10-Class Card", "10 次卡", "10회권"),
         totalCredits: 10,
-        priceAmount: 320000,
-        currency: "KRW",
+        priceAmount: 32000,
+        currency: "USD",
         validityDays: 180,
+        autoRenew: false,
+        contractVersion: "ca-2026-01",
+        taxCategory: "fitness_service",
         benefits: [
           "priority_booking",
           "exclusive_courses",
@@ -290,7 +280,10 @@ export function createSeedStore() {
         totalCredits: 10,
         remainingCredits: 10,
         expiresAt: new Date(now.getTime() + 120 * 24 * 60 * 60 * 1000).toISOString(),
-        frozenUntil: null
+        frozenUntil: null,
+        autoRenew: false,
+        contractVersion: "ca-2026-01",
+        contractAcceptedAt: now.toISOString()
       }
     ],
     cardTransactions: [],
@@ -300,8 +293,8 @@ export function createSeedStore() {
         title: tr("Studio Yoga Mat", "专业瑜伽垫", "스튜디오 요가 매트"),
         description: tr("Non-slip mat for studio practice.", "防滑专业练习垫。", "스튜디오 연습용 논슬립 매트입니다."),
         category: "yoga_mat",
-        priceAmount: 42000,
-        currency: "KRW",
+        priceAmount: 4200,
+        currency: "USD",
         stock: 20
       }
     ],
@@ -361,6 +354,8 @@ export function createSeedStore() {
       }
     ],
     translations: [],
+    privacyRequests: [],
+    membershipCancellationRequests: [],
     auditLogs: [],
     idempotencyRecords: []
   };
@@ -370,6 +365,12 @@ export function createSeedStore() {
 
 export function repairKnownTranslations(store) {
   let changed = false;
+  for (const collectionName of ["privacyRequests", "membershipCancellationRequests"]) {
+    if (!Array.isArray(store[collectionName])) {
+      store[collectionName] = [];
+      changed = true;
+    }
+  }
   const repair = (current, corrected) => {
     if (!current || typeof current !== "object") return current;
     const serialized = JSON.stringify(current);
@@ -454,6 +455,36 @@ export function repairKnownTranslations(store) {
   return changed;
 }
 
+export function effectiveCourseSessionStatus(session, now = Date.now()) {
+  if (session?.status !== "open") return session?.status;
+  const startsAt = new Date(session.startsAt).getTime();
+  return Number.isFinite(startsAt) && startsAt <= now ? "closed" : session.status;
+}
+
+export function repairOperationalState(store, now = Date.now()) {
+  let changed = false;
+
+  for (const collectionName of ["courses", "products", "contentBlocks"]) {
+    for (const entity of store[collectionName] ?? []) {
+      if (typeof entity.active !== "boolean") {
+        entity.active = true;
+        changed = true;
+      }
+    }
+  }
+
+  for (const session of store.courseSessions ?? []) {
+    const status = effectiveCourseSessionStatus(session, now);
+    if (status !== session.status) {
+      session.status = status;
+      session.updatedAt = new Date(now).toISOString();
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
 export function hardenProductionStore(store, {
   adminEmail = process.env.INITIAL_ADMIN_EMAIL,
   adminPassword = process.env.INITIAL_ADMIN_PASSWORD
@@ -492,13 +523,45 @@ export function hardenProductionStore(store, {
   return changed;
 }
 
+export function enforceFixedAdminAccount(store) {
+  const fixedAdmin = byId(store.users, FIXED_ADMIN_USER_ID);
+  if (!fixedAdmin) return false;
+
+  let changed = false;
+  for (const user of store.users) {
+    const roles = Array.isArray(user.roles) ? user.roles : [];
+    if (user.id === FIXED_ADMIN_USER_ID) {
+      if (!roles.includes(ROLES.ADMIN)) {
+        user.roles = [...roles, ROLES.ADMIN];
+        changed = true;
+      }
+      continue;
+    }
+    if (roles.includes(ROLES.ADMIN)) {
+      user.roles = roles.filter((role) => role !== ROLES.ADMIN);
+      changed = true;
+    }
+  }
+
+  const revokedAt = new Date().toISOString();
+  for (const session of store.roleSessions) {
+    if (
+      session.activeRole === ROLES.ADMIN
+      && session.userId !== FIXED_ADMIN_USER_ID
+      && !session.revokedAt
+    ) {
+      session.revokedAt = revokedAt;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 const PAYMENT_METHOD_LABELS = Object.freeze({
-  card: { en: "International Cards", zh: "国际银行卡", "zh-Hans": "国际银行卡", ko: "해외 카드" },
-  link: { en: "Link", zh: "Link 快捷支付", "zh-Hans": "Link 快捷支付", ko: "Link" },
+  card: { en: "Cards", zh: "银行卡", "zh-Hans": "银行卡", ko: "카드" },
   paypal: { en: "PayPal", zh: "PayPal", "zh-Hans": "PayPal", ko: "PayPal" },
   alipay: { en: "Alipay", zh: "支付宝", "zh-Hans": "支付宝", ko: "Alipay" },
   wechat_pay: { en: "WeChat Pay", zh: "微信支付", "zh-Hans": "微信支付", ko: "WeChat Pay" },
-  kr_card: { en: "Korean Cards", zh: "韩国本地银行卡", "zh-Hans": "韩国本地银行卡", ko: "국내 카드" },
   kakao_pay: { en: "Kakao Pay", zh: "Kakao Pay", "zh-Hans": "Kakao Pay", ko: "카카오페이" },
   naver_pay: { en: "Naver Pay", zh: "Naver Pay", "zh-Hans": "Naver Pay", ko: "네이버페이" },
   samsung_pay: { en: "Samsung Pay", zh: "Samsung Pay", "zh-Hans": "Samsung Pay", ko: "삼성페이" },
@@ -530,8 +593,8 @@ export function localizeEntity(entity, locale) {
   return out;
 }
 
-export function login(store, { email, password, role, locale = "en" }, signToken) {
-  const normalizedEmail = normalizeIdentity(email);
+export function login(store, { identifier, email, password, role, locale = "en" }, signToken) {
+  const normalizedEmail = normalizeEmail(identifier ?? email);
   if (!normalizedEmail || !password || !Object.values(ROLES).includes(role)) {
     throw problem(400, "invalid_login_request", "Email, password, and a valid role are required");
   }
@@ -542,6 +605,9 @@ export function login(store, { email, password, role, locale = "en" }, signToken
   if (!identity || !verifyPassword(password, identity.passwordHash)) {
     throw problem(401, "invalid_credentials", "Email or password is incorrect");
   }
+  if (!identity.verifiedAt) {
+    throw problem(403, "email_not_verified", "Verify your email before signing in");
+  }
 
   const user = byId(store.users, identity.userId);
   if (!user) {
@@ -550,6 +616,276 @@ export function login(store, { email, password, role, locale = "en" }, signToken
   if (!user.roles.includes(role)) {
     throw problem(403, "role_not_allowed", `User cannot log in as ${role}`);
   }
+
+  return createRoleSession(store, user, role, locale, signToken);
+}
+
+export function prepareFirebaseRegistration(store, {
+  name,
+  email: emailInput,
+  identifier,
+  password,
+  role = ROLES.STUDENT,
+  locale = "en",
+  inviteCode
+}, {
+  coachInviteCode = configuredCoachInviteCode()
+} = {}) {
+  validatePublicRegistrationRole(role, inviteCode, coachInviteCode);
+  const displayName = String(name ?? "").trim().replace(/\s+/g, " ");
+  if (displayName.length < 2 || displayName.length > 80) {
+    throw problem(400, "invalid_name", "Name must be between 2 and 80 characters");
+  }
+  const email = normalizeEmail(emailInput ?? identifier);
+  if (!email) throw problem(400, "invalid_email", "Enter a valid email address");
+  if (!isStrongPassword(password)) {
+    throw problem(400, "weak_password", "Password must contain at least 8 characters, one letter, and one number");
+  }
+  if (store.authIdentities.some((item) => item.type === "email" && item.value === email)) {
+    throw problem(409, "email_already_in_use", "This email is already registered");
+  }
+  return { name: displayName, email, password, role, locale };
+}
+
+export function registerFirebaseUser(store, registration, firebaseUid) {
+  const uid = String(firebaseUid ?? "").trim();
+  if (!uid) throw problem(502, "firebase_auth_invalid_response", "Firebase user ID is missing");
+  if (store.authIdentities.some((item) => item.firebaseUid === uid)) {
+    throw problem(409, "email_already_in_use", "This Firebase account is already linked");
+  }
+  if (store.authIdentities.some((item) => item.type === "email" && item.value === registration.email)) {
+    throw problem(409, "email_already_in_use", "This email is already registered");
+  }
+
+  const now = new Date().toISOString();
+  const user = {
+    id: id("usr"),
+    name: registration.name,
+    email: registration.email,
+    locale: registration.locale,
+    roles: [registration.role],
+    createdAt: now
+  };
+  store.users.push(user);
+  if (registration.role === ROLES.COACH) addCoachProfile(store, user);
+  store.authIdentities.push({
+    id: id("aid"),
+    userId: user.id,
+    type: "email",
+    value: registration.email,
+    provider: "firebase",
+    firebaseUid: uid,
+    verifiedAt: null,
+    createdAt: now
+  });
+  audit(store, { userId: user.id, activeRole: registration.role }, "auth.registration", user.id, {
+    identityType: "email",
+    provider: "firebase"
+  });
+  return {
+    requiresVerification: true,
+    email: registration.email,
+    verificationMethod: "link"
+  };
+}
+
+export function loginWithFirebaseUser(store, firebaseAccount, { role, locale = "en" }, signToken) {
+  const uid = String(firebaseAccount?.uid ?? "").trim();
+  const email = normalizeEmail(firebaseAccount?.email);
+  if (!uid || !email || !Object.values(ROLES).includes(role)) {
+    throw problem(400, "invalid_login_request", "Email, password, and a valid role are required");
+  }
+  if (!firebaseAccount.emailVerified) {
+    throw problem(403, "email_not_verified", "Verify your email before signing in");
+  }
+  if (firebaseAccount.disabled) throw problem(403, "account_disabled", "This account has been disabled");
+
+  const identity = store.authIdentities.find((item) => item.firebaseUid === uid)
+    ?? store.authIdentities.find((item) => item.type === "email" && item.value === email);
+  if (!identity || (identity.firebaseUid && identity.firebaseUid !== uid)) {
+    throw problem(401, "account_not_linked", "This Firebase account is not linked to a Good Vibe account");
+  }
+
+  const user = byId(store.users, identity.userId);
+  if (!user || user.deletedAt) throw problem(401, "account_not_linked", "This account is not active");
+  if (!user.roles.includes(role)) {
+    throw problem(403, "role_not_allowed", `User cannot log in as ${role}`);
+  }
+
+  const now = new Date().toISOString();
+  identity.provider = "firebase";
+  identity.firebaseUid = uid;
+  identity.verifiedAt = identity.verifiedAt ?? now;
+  delete identity.passwordHash;
+  user.email = email;
+  audit(store, { userId: user.id, activeRole: role }, "auth.firebase_login", user.id, { firebaseUid: uid });
+  return createRoleSession(store, user, role, locale, signToken);
+}
+
+export function register(store, {
+  name,
+  email: emailInput,
+  identifier,
+  password,
+  role = ROLES.STUDENT,
+  locale = "en",
+  inviteCode
+}, signToken, {
+  coachInviteCode = configuredCoachInviteCode()
+} = {}) {
+  validatePublicRegistrationRole(role, inviteCode, coachInviteCode);
+  const displayName = String(name ?? "").trim().replace(/\s+/g, " ");
+  if (displayName.length < 2 || displayName.length > 80) {
+    throw problem(400, "invalid_name", "Name must be between 2 and 80 characters");
+  }
+  const normalizedEmail = normalizeEmail(emailInput ?? identifier);
+  if (!normalizedEmail) {
+    throw problem(400, "invalid_email", "Enter a valid email address");
+  }
+  if (!isStrongPassword(password)) {
+    throw problem(400, "weak_password", "Password must contain at least 8 characters, one letter, and one number");
+  }
+  if (store.authIdentities.some((item) => (
+    item.type === "email" && item.value === normalizedEmail
+  ))) {
+    throw problem(409, "email_already_in_use", "This email is already registered");
+  }
+
+  const now = new Date().toISOString();
+  const user = {
+    id: id("usr"),
+    name: displayName,
+    email: normalizedEmail,
+    locale,
+    roles: [role],
+    createdAt: now
+  };
+  store.users.push(user);
+  if (role === ROLES.COACH) addCoachProfile(store, user);
+  store.authIdentities.push({
+    id: id("aid"),
+    userId: user.id,
+    type: "email",
+    value: normalizedEmail,
+    passwordHash: hashPassword(password),
+    verifiedAt: null,
+    createdAt: now
+  });
+  const { challenge, code: verificationCode } = createEmailVerificationChallenge(store, user.id, normalizedEmail);
+  audit(store, { userId: user.id, activeRole: role }, "auth.registration", user.id, {
+    identityType: "email"
+  });
+  return {
+    response: { requiresVerification: true, email: normalizedEmail, expiresAt: challenge.expiresAt },
+    delivery: { email: normalizedEmail, code: verificationCode, expiresAt: challenge.expiresAt },
+    userId: user.id
+  };
+}
+
+export function resendEmailVerification(store, { email, password }) {
+  const normalizedEmail = normalizeEmail(email);
+  const identity = store.authIdentities.find((item) => item.type === "email" && item.value === normalizedEmail);
+  if (!identity || !verifyPassword(password, identity.passwordHash)) {
+    throw problem(401, "invalid_credentials", "Email or password is incorrect");
+  }
+  if (identity.verifiedAt) throw problem(409, "email_already_verified", "Email is already verified");
+  const latest = [...store.emailVerificationChallenges].reverse().find((item) => item.userId === identity.userId);
+  if (latest && Date.now() - new Date(latest.createdAt).getTime() < 60_000) {
+    throw problem(429, "verification_code_cooldown", "Wait before requesting another verification code");
+  }
+  const now = new Date().toISOString();
+  for (const challenge of store.emailVerificationChallenges) {
+    if (challenge.userId === identity.userId && !challenge.consumedAt) challenge.consumedAt = now;
+  }
+  const { challenge, code } = createEmailVerificationChallenge(store, identity.userId, normalizedEmail);
+  return {
+    response: { requiresVerification: true, email: normalizedEmail, expiresAt: challenge.expiresAt },
+    delivery: { email: normalizedEmail, code, expiresAt: challenge.expiresAt },
+    userId: identity.userId
+  };
+}
+
+export function verifyEmailRegistration(store, { email, code, locale = "en" }, signToken) {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedCode = String(code ?? "").trim();
+  if (!normalizedEmail || !/^\d{6}$/.test(normalizedCode)) {
+    throw problem(400, "invalid_verification_code", "Enter the six-digit verification code");
+  }
+  const identity = store.authIdentities.find((item) => item.type === "email" && item.value === normalizedEmail);
+  if (!identity) throw problem(404, "registration_not_found", "Registration was not found");
+  if (identity.verifiedAt) throw problem(409, "email_already_verified", "Email is already verified");
+  const challenge = [...store.emailVerificationChallenges]
+    .reverse()
+    .find((item) => item.userId === identity.userId && !item.consumedAt);
+  if (!challenge || new Date(challenge.expiresAt).getTime() <= Date.now()) {
+    throw problem(410, "verification_code_expired", "Verification code has expired");
+  }
+  if (challenge.attempts >= 5) {
+    throw problem(429, "verification_attempts_exceeded", "Too many verification attempts");
+  }
+  challenge.attempts += 1;
+  if (!verificationCodeMatches(normalizedCode, challenge.codeHash, challenge.codeSalt)) {
+    throw problem(400, "invalid_verification_code", "Verification code is incorrect");
+  }
+  const now = new Date().toISOString();
+  identity.verifiedAt = now;
+  challenge.consumedAt = now;
+  const user = byIdRequired(store.users, identity.userId, "user_not_found");
+  const verifiedRole = user.roles.includes(ROLES.COACH) ? ROLES.COACH : ROLES.STUDENT;
+  audit(store, { userId: user.id, activeRole: verifiedRole }, "auth.email_verified", user.id, {});
+  return createRoleSession(store, user, verifiedRole, locale, signToken);
+}
+
+export function discardPendingRegistration(store, userId) {
+  const identity = store.authIdentities.find((item) => item.userId === userId);
+  if (identity?.verifiedAt) return false;
+  store.users = store.users.filter((item) => item.id !== userId);
+  store.authIdentities = store.authIdentities.filter((item) => item.userId !== userId);
+  store.emailVerificationChallenges = store.emailVerificationChallenges.filter((item) => item.userId !== userId);
+  store.coaches = store.coaches.filter((item) => item.userId !== userId);
+  store.auditLogs = store.auditLogs.filter((item) => item.actorUserId !== userId && item.entityId !== userId);
+  return true;
+}
+
+function validatePublicRegistrationRole(role, inviteCode, coachInviteCode) {
+  if (role === ROLES.ADMIN || ![ROLES.STUDENT, ROLES.COACH].includes(role)) {
+    throw problem(403, "role_registration_restricted", "Administrator accounts cannot be registered");
+  }
+  if (role !== ROLES.COACH) return;
+  const expected = String(coachInviteCode ?? "").trim();
+  if (!expected) {
+    throw problem(503, "coach_registration_not_configured", "Coach registration is not configured");
+  }
+  if (!secureTextEqual(String(inviteCode ?? "").trim(), expected)) {
+    throw problem(403, "invalid_coach_invite_code", "The coach invitation code is invalid");
+  }
+}
+
+function configuredCoachInviteCode() {
+  return globalThis.__GOOD_VIBE_COACH_INVITE_CODE__ ?? process.env.COACH_INVITE_CODE;
+}
+
+function secureTextEqual(actual, expected) {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length
+    && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
+function addCoachProfile(store, user) {
+  store.coaches.push({
+    id: id("coach"),
+    userId: user.id,
+    name: user.name,
+    age: null,
+    avatarUrl: null,
+    yearsOfExperience: 0,
+    tags: [],
+    bio: tr("", "", "")
+  });
+}
+
+function createRoleSession(store, user, role, locale, signToken) {
 
   const session = {
     id: id("ses"),
@@ -585,10 +921,11 @@ export function getCurrentUser(store, auth) {
   };
 }
 
-export function getPaymentMethods({ currency = "HKD", country = "HK", recurring = false } = {}) {
+export function getPaymentMethods({ currency = "USD", country = "US", recurring = false, all = false } = {}) {
   const normalizedCurrency = currency.toUpperCase();
   const normalizedCountry = country.toUpperCase();
   return PAYMENT_METHODS.filter((method) => {
+    if (all) return !recurring || method.recurring;
     const currencyOk = method.currencies.includes("*") || method.currencies.includes(normalizedCurrency);
     const countryOk = isCountryEligible(method, normalizedCountry);
     const recurringOk = !recurring || method.recurring;
@@ -596,7 +933,7 @@ export function getPaymentMethods({ currency = "HKD", country = "HK", recurring 
   }).map((method) => ({
     ...method,
     display: PAYMENT_METHOD_LABELS[method.code] ?? method.display,
-    cardDisplayGroup: method.code === "card" || method.code === "kr_card" ? "cards" : undefined
+    cardDisplayGroup: method.code === "card" ? "cards" : undefined
   }));
 }
 
@@ -609,6 +946,9 @@ export function createBooking(store, auth, body = {}, idempotencyKey) {
     byIdRequired(store.users, userId, "user_not_found");
     const courseSession = byIdRequired(store.courseSessions, body.courseSessionId, "course_session_not_found");
     const course = byIdRequired(store.courses, courseSession.courseId, "course_not_found");
+    if (course.active === false) {
+      throw problem(409, "course_inactive", "Course is not available for booking");
+    }
     if (courseSession.status !== "open") {
       throw problem(409, "session_closed", "Course session is not open");
     }
@@ -888,6 +1228,9 @@ export function createOrder(store, auth, body = {}, idempotencyKey) {
     if (!Array.isArray(body.items)) throw problem(400, "invalid_order_items", "items must be an array");
     const pendingItems = body.items.map((item) => {
       const product = byIdRequired(store.products, item.productId, "product_not_found");
+      if (product.active === false) {
+        throw problem(409, "product_inactive", "Product is not available for purchase");
+      }
       const quantity = requirePositiveInteger(item.quantity, "invalid_quantity", "quantity");
       const stock = requireNonNegativeInteger(product.stock, "invalid_product_stock", "stock");
       const unitAmount = requirePositiveInteger(product.priceAmount, "invalid_product_price", "priceAmount");
@@ -929,8 +1272,8 @@ export function validatePaymentRequest(store, auth, {
   }
   const method = PAYMENT_METHODS.find((item) => item.code === methodCode);
   if (!method) throw problem(400, "unsupported_payment_method", "Unsupported payment method");
-  const normalizedCurrency = String(currency ?? order?.currency ?? "HKD").trim().toUpperCase();
-  const normalizedCountry = String(country ?? "HK").trim().toUpperCase();
+  const normalizedCurrency = String(currency ?? order?.currency ?? "USD").trim().toUpperCase();
+  const normalizedCountry = String(country ?? "US").trim().toUpperCase();
   const normalizedAmount = requirePositiveInteger(amount ?? order?.totalAmount, "invalid_payment_amount", "amount");
   if (order && normalizedAmount !== order.totalAmount) {
     throw problem(409, "payment_amount_mismatch", "Payment amount must equal the order total");
@@ -1094,7 +1437,7 @@ export function applyStripeEvent(store, event) {
   }
 
   const checkoutCompletedAndPaid = type === "checkout.session.completed"
-    && [undefined, "paid", "no_payment_required"].includes(object.payment_status);
+    && ["paid", "no_payment_required"].includes(object.payment_status);
   if (
     type === "payment_intent.succeeded"
     || type === "checkout.session.async_payment_succeeded"
@@ -1201,6 +1544,110 @@ export function memberCardOperation(store, auth, cardId, operation, body = {}) {
   return { card };
 }
 
+export function requestMembershipCancellation(store, auth, cardId, body = {}) {
+  requireRole(auth, [ROLES.STUDENT, ROLES.STAFF, ROLES.ADMIN]);
+  const card = byIdRequired(store.memberCards, cardId, "member_card_not_found");
+  requireOwnershipOrRole(auth, card.userId, [ROLES.STAFF, ROLES.ADMIN]);
+  normalizeMemberCardStatus(card);
+  if (!["active", "frozen"].includes(card.status)) {
+    throw problem(409, "membership_not_cancellable", "Only active or frozen memberships can be cancelled");
+  }
+  const existing = store.membershipCancellationRequests.find(
+    (item) => item.cardId === card.id && item.status === "pending"
+  );
+  if (existing) return { request: existing, card };
+
+  const now = new Date().toISOString();
+  const request = {
+    id: id("mcr"),
+    cardId: card.id,
+    userId: card.userId,
+    reason: String(body.reason ?? "user_request").slice(0, 500),
+    method: "in_app",
+    status: "pending",
+    requestedAt: now,
+    contractVersion: card.contractVersion ?? null
+  };
+  card.autoRenew = false;
+  card.autoRenewCancelledAt = now;
+  store.membershipCancellationRequests.push(request);
+  audit(store, auth, "membership.cancellation_requested", card.id, { requestId: request.id });
+  return { request, card };
+}
+
+export function createPrivacyRequest(store, auth, body = {}) {
+  requireRole(auth, [ROLES.STUDENT, ROLES.COACH, ROLES.STAFF, ROLES.ADMIN]);
+  const type = String(body.type ?? "").trim().toLowerCase();
+  if (!["access", "correction", "deletion", "limit"].includes(type)) {
+    throw problem(400, "invalid_privacy_request_type", "Privacy request type is invalid");
+  }
+  const request = {
+    id: id("prv"),
+    userId: auth.userId,
+    type,
+    details: String(body.details ?? "").slice(0, 2000),
+    status: "pending",
+    channel: "in_app",
+    requestedAt: new Date().toISOString()
+  };
+  store.privacyRequests.push(request);
+  audit(store, auth, "privacy.request_created", request.id, { type });
+  return request;
+}
+
+export function exportPrivacyData(store, auth) {
+  requireRole(auth, [ROLES.STUDENT, ROLES.COACH, ROLES.STAFF, ROLES.ADMIN]);
+  const userId = auth.userId;
+  return {
+    generatedAt: new Date().toISOString(),
+    user: publicUser(byIdRequired(store.users, userId, "user_not_found")),
+    bookings: store.bookings.filter((item) => item.userId === userId),
+    memberCards: store.memberCards.filter((item) => item.userId === userId),
+    cardTransactions: store.cardTransactions.filter((item) => item.userId === userId),
+    orders: store.orders.filter((item) => item.userId === userId),
+    payments: store.payments.filter((item) => item.userId === userId),
+    reviews: store.reviews.filter((item) => item.userId === userId),
+    bodyMetrics: store.bodyMetrics.filter((item) => item.userId === userId),
+    privacyRequests: store.privacyRequests.filter((item) => item.userId === userId),
+    membershipCancellationRequests: store.membershipCancellationRequests.filter((item) => item.userId === userId)
+  };
+}
+
+export function deleteAccount(store, auth) {
+  requireRole(auth, [ROLES.STUDENT, ROLES.COACH, ROLES.STAFF, ROLES.ADMIN]);
+  const user = byIdRequired(store.users, auth.userId, "user_not_found");
+  if (user.roles.includes(ROLES.ADMIN)) {
+    const remainingAdmins = store.users.filter(
+      (candidate) => candidate.id !== user.id && candidate.roles.includes(ROLES.ADMIN) && !candidate.deletedAt
+    );
+    if (!remainingAdmins.length) {
+      throw problem(409, "last_admin_account", "The last administrator account cannot be deleted");
+    }
+  }
+
+  const now = new Date().toISOString();
+  const cancellableBookings = store.bookings.filter(
+    (item) => item.userId === user.id && [BOOKING_STATUS.PENDING_PAYMENT, BOOKING_STATUS.CONFIRMED].includes(item.status)
+  );
+  for (const booking of cancellableBookings) cancelBooking(store, auth, booking.id, "account_deletion");
+
+  store.authIdentities = store.authIdentities.filter((item) => item.userId !== user.id);
+  store.emailVerificationChallenges = store.emailVerificationChallenges.filter((item) => item.userId !== user.id);
+  for (const session of store.roleSessions.filter((item) => item.userId === user.id)) session.revokedAt = now;
+  store.reviews = store.reviews.filter((item) => item.userId !== user.id);
+  store.bodyMetrics = store.bodyMetrics.filter((item) => item.userId !== user.id);
+  user.name = "Deleted User";
+  user.email = undefined;
+  user.phone = undefined;
+  user.avatarUrl = undefined;
+  user.avatarObjectKey = undefined;
+  user.roles = [];
+  user.deletedAt = now;
+  user.deletionStatus = "completed";
+  audit(store, auth, "privacy.account_deleted", user.id, { completedAt: now });
+  return { ok: true, completedAt: now };
+}
+
 export function requireRole(auth, roles) {
   if (!auth || !roles.includes(auth.activeRole)) {
     throw problem(403, "forbidden", "Insufficient role permission");
@@ -1219,6 +1666,7 @@ export function publicUser(user) {
     name: user.name,
     email: user.email,
     phone: user.phone,
+    avatarUrl: user.avatarUrl ?? null,
     locale: user.locale,
     roles: user.roles
   };
@@ -1247,6 +1695,45 @@ export function byIdRequired(collection, idValue, code) {
 
 export function normalizeIdentity(value) {
   return String(value ?? "").trim().toLowerCase();
+}
+
+export function normalizeEmail(value) {
+  const normalized = normalizeIdentity(value);
+  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(normalized) ? normalized : "";
+}
+
+function isStrongPassword(password) {
+  const value = String(password ?? "");
+  return value.length >= 8 && value.length <= 128 && /[A-Za-z]/.test(value) && /\d/.test(value);
+}
+
+function hashVerificationCode(code, salt) {
+  return crypto.createHash("sha256").update(`${salt}:${code}`).digest("hex");
+}
+
+function createEmailVerificationChallenge(store, userId, email) {
+  const code = String(crypto.randomInt(100000, 1000000));
+  const codeSalt = crypto.randomBytes(16).toString("hex");
+  const now = new Date().toISOString();
+  const challenge = {
+    id: id("evc"),
+    userId,
+    email,
+    codeHash: hashVerificationCode(code, codeSalt),
+    codeSalt,
+    attempts: 0,
+    createdAt: now,
+    expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    consumedAt: null
+  };
+  store.emailVerificationChallenges.push(challenge);
+  return { challenge, code };
+}
+
+function verificationCodeMatches(code, expectedHash, salt) {
+  const actual = Buffer.from(hashVerificationCode(code, salt), "hex");
+  const expected = Buffer.from(String(expectedHash ?? ""), "hex");
+  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
 export function audit(store, auth, action, entityId, metadata) {

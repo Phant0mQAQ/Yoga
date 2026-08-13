@@ -56,6 +56,30 @@ components:
           enum: [student, coach, staff, admin]
         locale:
           enum: [en, zh-Hans, ko]
+    RegistrationRequest:
+      type: object
+      required: [name, email, password, role]
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 80
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+        role:
+          enum: [student, coach]
+          description: Students register publicly. Coaches must also provide the fixed studio invitation code. Administrators cannot register.
+        inviteCode:
+          type: string
+          description: Required when role is coach. This server-side invitation secret must never be embedded in a client build.
+        locale:
+          enum: [en, zh-Hans, ko]
     Booking:
       type: object
       properties:
@@ -100,7 +124,7 @@ components:
       type: object
       properties:
         code:
-          enum: [card, link, paypal, alipay, wechat_pay, kr_card, kakao_pay, naver_pay, samsung_pay, payco]
+          enum: [card, paypal, alipay, wechat_pay, kakao_pay, naver_pay, samsung_pay, payco]
         family:
           enum: [card, wallet, local_wallet]
         flow:
@@ -189,7 +213,7 @@ components:
       required: [storage, objectKey, uploadUrl, publicUrl, expiresAt]
       properties:
         storage:
-          enum: [supabase, memory]
+          enum: [supabase, oss, memory]
         objectKey:
           type: string
         uploadUrl:
@@ -216,6 +240,56 @@ paths:
       responses:
         "200":
           description: Session token and user profile.
+  /auth/register:
+    post:
+      security: []
+      summary: Create an unverified Firebase student or invited-coach account and send a hosted email verification link.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegistrationRequest"
+      responses:
+        "201":
+          description: Email verification is required before a session can be created.
+        "403":
+          description: The coach invitation code is invalid, or administrator registration was attempted.
+        "503":
+          description: Firebase Authentication is not configured or unavailable.
+  /auth/email/verify:
+    post:
+      security: []
+      deprecated: true
+      summary: Deprecated code-verification endpoint; Firebase verification links must be opened before signing in again.
+      responses:
+        "410":
+          description: Verification link required.
+  /auth/email/resend:
+    post:
+      security: []
+      summary: Ask Firebase Authentication to resend the verification email.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                locale:
+                  enum: [en, zh-Hans, ko]
+      responses:
+        "200":
+          description: A replacement Firebase verification email was sent.
+        "429":
+          description: Firebase rate limiting or email quota prevented the request.
   /auth/logout:
     post:
       summary: Revoke the current role session.
@@ -228,6 +302,57 @@ paths:
       responses:
         "200":
           description: Current user.
+  /me/avatar-upload:
+    post:
+      summary: Create a signed upload URL for the current user's profile photo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fileName, contentType]
+              properties:
+                fileName:
+                  type: string
+                contentType:
+                  enum: [image/jpeg, image/png, image/webp, image/heic, image/heif]
+                fileSize:
+                  type: integer
+                  minimum: 1
+                  maximum: 10000000
+      responses:
+        "200":
+          description: Signed upload metadata scoped to the authenticated user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresignedUpload"
+        "400":
+          description: Unsupported image type.
+        "413":
+          description: Image exceeds 10 MB.
+  /me/avatar:
+    patch:
+      summary: Save a successfully uploaded profile photo for the current user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [objectKey]
+              properties:
+                objectKey:
+                  type: string
+                  description: Must be scoped under avatars/{currentUserId}/.
+      responses:
+        "200":
+          description: Updated public user profile including avatarUrl.
+        "400":
+          description: The object key does not belong to the current user.
+        "409":
+          description: Development-memory upload has not completed.
   /home:
     get:
       security: []
@@ -451,7 +576,7 @@ paths:
   /payments/methods:
     get:
       security: []
-      summary: Eligible Stripe payment methods for country/currency.
+      summary: Stripe payment methods, optionally including the complete supported catalog.
       parameters:
         - name: country
           in: query
@@ -468,6 +593,12 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: scope
+          in: query
+          description: Use `all` to return every payment method supported by the product; omit it for country/currency eligibility.
+          schema:
+            type: string
+            enum: [all]
       responses:
         "200":
           description: Payment methods.
@@ -593,7 +724,7 @@ paths:
       servers:
         - url: http://localhost:8080
       security: []
-      summary: HTTPS Checkout return bridge to the yomiyoga app URL scheme.
+      summary: HTTPS Checkout return bridge to the goodvibe app URL scheme.
       description: Production APP_BASE_URL must use HTTPS. This page never fulfills an order; Stripe webhooks remain authoritative.
       parameters:
         - name: status

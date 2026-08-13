@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
+import Stripe from "stripe";
 
-const STRIPE_API_BASE = "https://api.stripe.com/v1";
 const STRIPE_API_VERSION = "2026-02-25.clover";
 
 export async function createStripePaymentIntent({
@@ -23,15 +23,13 @@ export async function createStripePaymentIntent({
     };
   }
 
-  const payload = new URLSearchParams();
-  payload.set("amount", String(amount));
-  payload.set("currency", currency.toLowerCase());
-  payload.set("metadata[order_id]", orderId ?? "");
-  payload.set("automatic_payment_methods[enabled]", "false");
-  payload.append("payment_method_types[]", stripeMethodCode(methodCode));
-  if (customerEmail) payload.set("receipt_email", customerEmail);
-
-  return stripeRequest("/payment_intents", payload, secretKey, { idempotencyKey });
+  return stripeOperation(() => stripeClient(secretKey).paymentIntents.create({
+    amount,
+    currency: currency.toLowerCase(),
+    ...(orderId ? { metadata: { order_id: orderId } } : {}),
+    automatic_payment_methods: { enabled: true },
+    ...(customerEmail ? { receipt_email: customerEmail } : {})
+  }, requestOptions(idempotencyKey)));
 }
 
 export async function createStripePaymentSheet({
@@ -40,7 +38,7 @@ export async function createStripePaymentSheet({
   methodCode,
   orderId,
   customerEmail,
-  merchantIdentifier = process.env.STRIPE_MERCHANT_IDENTIFIER ?? "merchant.com.yomiyoga.studio",
+  merchantIdentifier = process.env.STRIPE_MERCHANT_IDENTIFIER ?? "merchant.com.goodvibe.pilatesyoga",
   idempotencyKey
 }) {
   const paymentIntent = await createStripePaymentIntent({
@@ -82,6 +80,7 @@ export async function createStripeCheckoutSession({
   methodCode,
   orderId,
   productName,
+  customerEmail,
   successUrl,
   cancelUrl,
   idempotencyKey
@@ -100,18 +99,26 @@ export async function createStripeCheckoutSession({
     };
   }
 
-  const payload = new URLSearchParams();
-  payload.set("mode", "payment");
-  payload.set("success_url", successUrl);
-  payload.set("cancel_url", cancelUrl);
-  payload.set("metadata[order_id]", orderId ?? "");
-  payload.append("payment_method_types[]", stripeMethodCode(methodCode));
-  payload.set("line_items[0][price_data][currency]", currency.toLowerCase());
-  payload.set("line_items[0][price_data][unit_amount]", String(amount));
-  payload.set("line_items[0][price_data][product_data][name]", productName ?? "Good Vibe Pilates & Yoga");
-  payload.set("line_items[0][quantity]", "1");
-
-  return stripeRequest("/checkout/sessions", payload, secretKey, { idempotencyKey });
+  return stripeOperation(() => stripeClient(secretKey).checkout.sessions.create({
+    mode: "payment",
+    origin_context: "mobile_app",
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    ...(orderId ? {
+      client_reference_id: orderId,
+      metadata: { order_id: orderId },
+      payment_intent_data: { metadata: { order_id: orderId } }
+    } : {}),
+    ...(customerEmail ? { customer_email: customerEmail } : {}),
+    line_items: [{
+      price_data: {
+        currency: currency.toLowerCase(),
+        unit_amount: amount,
+        product_data: { name: productName ?? "Good Vibe Pilates & Yoga" }
+      },
+      quantity: 1
+    }]
+  }, requestOptions(idempotencyKey)));
 }
 
 export async function createStripeRefund({
@@ -131,18 +138,18 @@ export async function createStripeRefund({
     };
   }
 
-  const payload = new URLSearchParams();
-  if (paymentIntentId) payload.set("payment_intent", paymentIntentId);
-  else if (chargeId) payload.set("charge", chargeId);
-  else throw providerInputError("A Stripe payment intent or charge is required for refunds");
-  payload.set("amount", String(amount));
+  if (!paymentIntentId && !chargeId) {
+    throw providerInputError("A Stripe payment intent or charge is required for refunds");
+  }
   const stripeReason = ["duplicate", "fraudulent", "requested_by_customer"].includes(reason)
     ? reason
     : "requested_by_customer";
-  payload.set("reason", stripeReason);
-  if (reason && reason !== stripeReason) payload.set("metadata[internal_reason]", String(reason));
-
-  return stripeRequest("/refunds", payload, secretKey, { idempotencyKey });
+  return stripeOperation(() => stripeClient(secretKey).refunds.create({
+    ...(paymentIntentId ? { payment_intent: paymentIntentId } : { charge: chargeId }),
+    amount,
+    reason: stripeReason,
+    ...(reason && reason !== stripeReason ? { metadata: { internal_reason: String(reason) } } : {})
+  }, requestOptions(idempotencyKey)));
 }
 
 export function verifyStripeWebhook(
@@ -152,7 +159,16 @@ export function verifyStripeWebhook(
   { toleranceSeconds = 300, now = Date.now() } = {}
 ) {
   const payload = normalizeWebhookPayload(rawBody);
-  if (!secret) return parseWebhookPayload(payload);
+  if (!secret) {
+    if (process.env.STRIPE_SECRET_KEY?.trim()) {
+      throw webhookProblem(
+        "stripe_webhook_secret_missing",
+        "Stripe webhook verification is unavailable because STRIPE_WEBHOOK_SECRET is not configured",
+        503
+      );
+    }
+    return parseWebhookPayload(payload);
+  }
   if (!signatureHeader) {
     throw webhookProblem("invalid_stripe_signature", "Missing Stripe-Signature header");
   }
@@ -199,16 +215,10 @@ export function verifyStripeWebhook(
   return parseWebhookPayload(payload);
 }
 
-export function stripeMethodCode(methodCode) {
-  if (methodCode === "card" || methodCode === "apple_pay") return "card";
-  return methodCode;
-}
-
 function methodRequiresRedirect(methodCode) {
   return [
     "alipay",
     "wechat_pay",
-    "kr_card",
     "kakao_pay",
     "naver_pay",
     "samsung_pay",
@@ -216,27 +226,30 @@ function methodRequiresRedirect(methodCode) {
   ].includes(methodCode);
 }
 
-async function stripeRequest(path, payload, secretKey, { idempotencyKey } = {}) {
-  const response = await fetch(`${STRIPE_API_BASE}${path}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${secretKey}`,
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Stripe-Version": STRIPE_API_VERSION,
-      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {})
-    },
-    body: payload
+function stripeClient(secretKey) {
+  return new Stripe(secretKey, {
+    apiVersion: STRIPE_API_VERSION,
+    httpClient: Stripe.createFetchHttpClient(),
+    maxNetworkRetries: 2,
+    telemetry: false
   });
-  const data = await response.json();
-  if (!response.ok) {
-    const message = data?.error?.message ?? `Stripe request failed with ${response.status}`;
-    const err = new Error(message);
-    err.status = 502;
-    err.code = "stripe_error";
-    err.stripe = data;
-    throw err;
+}
+
+function requestOptions(idempotencyKey) {
+  return idempotencyKey ? { idempotencyKey } : {};
+}
+
+async function stripeOperation(operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error?.code === "stripe_error") throw error;
+    const wrapped = new Error(error?.message ?? "Stripe request failed");
+    wrapped.status = 502;
+    wrapped.code = "stripe_error";
+    wrapped.stripe = error?.raw ?? null;
+    throw wrapped;
   }
-  return data;
 }
 
 function appendQueryParams(value, params) {
@@ -266,9 +279,9 @@ function parseWebhookPayload(payload) {
   }
 }
 
-function webhookProblem(code, message) {
+function webhookProblem(code, message, status = 400) {
   const error = new Error(message);
-  error.status = 400;
+  error.status = status;
   error.code = code;
   return error;
 }

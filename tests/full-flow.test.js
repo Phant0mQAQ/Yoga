@@ -29,12 +29,31 @@ try {
   assert.equal((await api("/coaches/coach_sora")).id, "coach_sora");
   assert.ok((await api("/availability?locale=en")).length > 0);
   assert.ok((await api("/products")).length > 0);
-  assert.ok((await api("/payments/methods?country=KR&currency=KRW")).some((item) => item.code === "kr_card"));
+  assert.ok((await api("/payments/methods?country=KR&currency=KRW")).some((item) => item.code === "kakao_pay"));
 
   const student = await login("student");
   const coach = await login("coach");
   const staff = await login("staff");
   const admin = await login("admin");
+
+  const legal = await api("/legal");
+  assert.equal(legal.region, "California, US");
+  assert.ok(legal.supportUrl.endsWith("/support"));
+  assert.equal((await api("/privacy/requests", {
+    method: "POST",
+    token: student.token,
+    expectStatus: 201,
+    body: { type: "access" }
+  })).status, "pending");
+  assert.equal((await api("/privacy/export", { token: student.token })).user.id, "usr_student");
+  assert.equal((await api("/member-cards/card_student_10/cancel-request", {
+    method: "POST",
+    token: student.token,
+    expectStatus: 201,
+    body: { reason: "full_flow_test" }
+  })).request.status, "pending");
+  assert.equal((await api("/admin/privacy-requests", { token: admin.token })).length, 1);
+  assert.equal((await api("/admin/membership-cancellation-requests", { token: admin.token })).length, 1);
 
   assert.equal((await api("/me", { token: student.token })).activeRole, "student");
   assert.equal((await api("/me", { token: coach.token })).activeRole, "coach");
@@ -119,7 +138,7 @@ try {
     token: student.token,
     idempotencyKey: "full-flow-payment-intent",
     expectStatus: 201,
-    body: { orderId: createdOrder.order.id, country: "KR", currency: "KRW", methodCode: "card" }
+    body: { orderId: createdOrder.order.id, country: "US", currency: "USD", methodCode: "card" }
   });
   assert.ok(intent.payment.id);
   const paymentSucceeded = await api("/payments/stripe/webhook", {
@@ -141,7 +160,7 @@ try {
     token: student.token,
     idempotencyKey: "full-flow-payment-sheet",
     expectStatus: 201,
-    body: { amount: 10000, country: "KR", currency: "KRW", methodCode: "kr_card" }
+    body: { amount: 10000, country: "KR", currency: "KRW", methodCode: "kakao_pay" }
   });
   assert.ok(sheet.stripe.paymentIntentClientSecret);
   const checkout = await api("/payments/stripe/checkout-sessions", {
@@ -154,8 +173,8 @@ try {
       country: "KR",
       currency: "KRW",
       methodCode: "kakao_pay",
-      successUrl: "yogabooking://payment-return?status=success",
-      cancelUrl: "yogabooking://payment-return?status=cancel"
+      successUrl: "goodvibe://payment-return?status=success",
+      cancelUrl: "goodvibe://payment-return?status=cancel"
     }
   });
   assert.ok(checkout.payment.id);
@@ -258,7 +277,7 @@ function login(role) {
     method: "POST",
     body: {
       email: `${role}@example.com`,
-      password: "Yomi@2026",
+      password: "GoodVibe@2026",
       role,
       locale: "en"
     }

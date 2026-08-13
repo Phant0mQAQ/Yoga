@@ -9,7 +9,7 @@ const publishableKey = publicSetting(
 const merchantIdentifier = publicSetting(
   process.env.EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER,
   "EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER",
-  "merchant.com.yomiyoga.studio"
+  "merchant.com.goodvibe.pilatesyoga"
 );
 
 export function PaymentProvider({ children }: { children: ReactElement }) {

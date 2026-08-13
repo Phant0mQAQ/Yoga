@@ -9,6 +9,8 @@ import {
   cancelBooking,
   checkInBooking,
   createBooking,
+  createPrivacyRequest,
+  discardPendingRegistration,
   createOrder,
   createPaymentRecord,
   createSeedStore,
@@ -16,25 +18,40 @@ import {
   byIdRequired,
   getCurrentUser,
   getPaymentMethods,
+  exportPrivacyData,
+  enforceFixedAdminAccount,
+  effectiveCourseSessionStatus,
+  FIXED_ADMIN_USER_ID,
   hardenProductionStore,
   id,
   localizeEntity,
   login,
+  loginWithFirebaseUser,
   logout,
   memberCardOperation,
+  requestMembershipCancellation,
   normalizeMemberCardStatus,
   normalizeIdentity,
   prepareRefund,
+  prepareFirebaseRegistration,
   problem,
   recordRefund,
   releasePendingOrderResources,
+  resendEmailVerification,
   requireRole,
   repairKnownTranslations,
+  repairOperationalState,
+  register,
+  registerFirebaseUser,
   rescheduleBooking,
   ROLES,
-  validatePaymentRequest
+  validatePaymentRequest,
+  verifyEmailRegistration,
+  deleteAccount
 } from "./src/domain.js";
 import { signToken, verifyToken } from "./src/auth.js";
+import { createEmailProvider } from "./src/email-provider.js";
+import { createFirebaseAuthProvider } from "./src/firebase-auth-provider.js";
 import {
   createStripeCheckoutSession,
   createStripePaymentSheet,
@@ -45,25 +62,33 @@ import {
 import { createStoreRepository, restoreStore } from "./src/store-repository.js";
 import { createStorageUploadProvider } from "./src/storage-provider.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname = typeof import.meta.url === "string"
+  ? path.dirname(fileURLToPath(import.meta.url))
+  : process.cwd();
 const adminDir = path.resolve(__dirname, "../admin");
 const mobileDir = path.resolve(__dirname, "../mobile");
 const mockUploads = new Map();
+const cloudflareMediaBucket = globalThis.__GOOD_VIBE_MEDIA_BUCKET__;
 const storageUploadProvider = createStorageUploadProvider();
+const emailProvider = createEmailProvider();
+const firebaseAuthProvider = createFirebaseAuthProvider();
+const usesFirebaseAuth = String(process.env.AUTH_PROVIDER ?? "local").toLowerCase() === "firebase";
 const asyncIdempotencyInFlight = new Map();
 const orderPaymentLocks = new Map();
-let mutationLockTail = Promise.resolve();
+let storeLockTail = Promise.resolve();
 assertProductionConfiguration();
 const storeRepository = createStoreRepository();
-const store = await storeRepository.load(createSeedStore());
-const storeNeedsSave = repairKnownTranslations(store);
-const productionStoreChanged = hardenProductionStore(store);
-if (storeNeedsSave || productionStoreChanged) {
-  await storeRepository.save(store);
-}
+let store;
+let storeInitialization;
+let storeLastRefreshedAt = 0;
+let storeRefreshPromise = null;
+const configuredStoreRefreshTtlMs = Number(process.env.STORE_REFRESH_TTL_MS ?? 2_000);
+const storeRefreshTtlMs = Number.isFinite(configuredStoreRefreshTtlMs)
+  ? Math.max(250, configuredStoreRefreshTtlMs)
+  : 2_000;
 const port = Number(process.env.PORT ?? 8080);
 if (process.env.NODE_ENV === "production" && !storageUploadProvider.enabled) {
-  console.warn("SUPABASE_STORAGE_BUCKET is not configured; production uploads will return storage_not_configured");
+  console.warn("Durable cloud storage is not configured; production uploads will return storage_not_configured");
 }
 
 const server = http.createServer(async (req, res) => {
@@ -83,6 +108,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: "good-vibe-pilates-yoga-api",
         database: storeRepository.kind,
+        authentication: usesFirebaseAuth ? "firebase" : "local",
         time: new Date().toISOString()
       });
       return;
@@ -90,6 +116,11 @@ const server = http.createServer(async (req, res) => {
 
     if (url.pathname === "/payments/return" && req.method === "GET") {
       servePaymentReturnBridge(res, url);
+      return;
+    }
+
+    if (["/privacy", "/privacy-choices", "/terms", "/support"].includes(url.pathname) && req.method === "GET") {
+      serveLegalPage(res, url.pathname);
       return;
     }
 
@@ -113,14 +144,41 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (storeRepository.enabled && isMutation(req.method)) {
-      releaseMutationLock = await acquireMutationLock();
-      rollbackSnapshot = structuredClone(store);
-      res.yomiDeferJson = true;
+    const isMediaBinaryUpload = req.method === "PUT" && (
+      url.pathname.startsWith("/api/v1/me/avatar-upload/")
+      || url.pathname.startsWith("/api/v1/admin/uploads/")
+    );
+    const isStripeWebhook = url.pathname === "/api/v1/payments/stripe/webhook" && req.method === "POST";
+    const rawBody = isStripeWebhook ? await readRawBody(req) : null;
+    const body = isStripeWebhook || isMediaBinaryUpload ? {} : await readJson(req);
+
+    if (
+      usesFirebaseAuth
+      && storeRepository.enabled
+      && isIsolatedFirebaseAuthRequest(req.method, url.pathname)
+    ) {
+      await handleIsolatedFirebaseAuth(res, url, body);
+      return;
     }
 
-    if (url.pathname === "/api/v1/payments/stripe/webhook" && req.method === "POST") {
-      const rawBody = await readRawBody(req);
+    await initializeStore();
+    if (storeRepository.enabled) {
+      releaseMutationLock = await acquireStoreLock();
+      await refreshStore({ force: isMutation(req.method) });
+      if (isMutation(req.method)) {
+        rollbackSnapshot = structuredClone(store);
+        res.goodVibeDeferJson = true;
+      }
+    }
+
+    if (isMediaBinaryUpload) {
+      const auth = optionalAuth(req);
+      req.goodVibeAuth = auth;
+      await receiveCloudflareMediaUpload(req, res, url, auth);
+      return;
+    }
+
+    if (isStripeWebhook) {
       const event = verifyStripeWebhook(rawBody, req.headers["stripe-signature"]);
       const result = applyStripeEvent(store, event);
       sendJson(res, 200, result);
@@ -128,7 +186,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const body = await readJson(req);
     const isLogoutRequest = req.method === "POST" && url.pathname === "/api/v1/auth/logout";
     const auth = optionalAuth(req, { ignoreInvalid: isLogoutRequest });
     req.goodVibeAuth = auth;
@@ -136,8 +193,8 @@ const server = http.createServer(async (req, res) => {
     await persistAndFlush(res);
   } catch (error) {
     if (rollbackSnapshot) restoreStore(store, rollbackSnapshot);
-    res.yomiDeferJson = false;
-    res.yomiPendingJson = null;
+    res.goodVibeDeferJson = false;
+    res.goodVibePendingJson = null;
     const status = error.status ?? 500;
     if (!res.headersSent) {
       sendJson(res, status, {
@@ -150,6 +207,182 @@ const server = http.createServer(async (req, res) => {
     releaseMutationLock?.();
   }
 });
+
+function isIsolatedFirebaseAuthRequest(method, pathname) {
+  return method === "POST" && [
+    "/api/v1/auth/login",
+    "/api/v1/auth/register",
+    "/api/v1/auth/email/resend"
+  ].includes(pathname);
+}
+
+async function handleIsolatedFirebaseAuth(res, url, body) {
+  const pathName = url.pathname.replace("/api/v1", "") || "/";
+
+  if (pathName === "/auth/login") {
+    const firebaseAccount = await firebaseAuthProvider.signIn({
+      email: normalizeIdentity(body.identifier ?? body.email),
+      password: body.password,
+      locale: body.locale
+    });
+    const response = await mutateIsolatedStore((requestStore) => (
+      loginWithFirebaseUser(requestStore, firebaseAccount, body, signToken)
+    ));
+    sendJson(res, 200, {
+      ...response,
+      firebase: {
+        idToken: firebaseAccount.idToken,
+        refreshToken: firebaseAccount.refreshToken,
+        expiresIn: firebaseAccount.expiresIn
+      }
+    });
+    return;
+  }
+
+  if (pathName === "/auth/register") {
+    const registration = prepareFirebaseRegistration({ authIdentities: [] }, body);
+    let firebaseAccount;
+    let createdFirebaseAccount = false;
+    try {
+      firebaseAccount = await firebaseAuthProvider.signUp(registration);
+      createdFirebaseAccount = true;
+    } catch (error) {
+      if (error?.code !== "email_already_in_use") throw error;
+      firebaseAccount = await firebaseAuthProvider.signIn({
+        email: registration.email,
+        password: registration.password,
+        locale: registration.locale
+      });
+    }
+    let response;
+    try {
+      response = await mutateIsolatedStore((requestStore) => {
+        const currentRegistration = prepareFirebaseRegistration(requestStore, body);
+        return registerFirebaseUser(requestStore, currentRegistration, firebaseAccount.uid);
+      });
+    } catch (error) {
+      if (createdFirebaseAccount) {
+        await firebaseAuthProvider.deleteCurrentUser({ idToken: firebaseAccount.idToken }).catch(() => null);
+      }
+      throw error;
+    }
+
+    let verificationDeliveryPending = false;
+    if (!firebaseAccount.emailVerified) {
+      try {
+        await firebaseAuthProvider.sendEmailVerification({
+          idToken: firebaseAccount.idToken,
+          locale: registration.locale
+        });
+      } catch (error) {
+        verificationDeliveryPending = true;
+        console.warn(`Firebase verification delivery is pending: ${error.code ?? "firebase_auth_failed"}`);
+      }
+    }
+    sendJson(res, 201, {
+      ...response,
+      ...(verificationDeliveryPending ? { verificationDeliveryPending: true } : {})
+    });
+    return;
+  }
+
+  const firebaseAccount = await firebaseAuthProvider.signIn({
+    email: normalizeIdentity(body.email),
+    password: body.password,
+    locale: body.locale
+  });
+  if (firebaseAccount.emailVerified) {
+    throw problem(409, "email_already_verified", "Email is already verified");
+  }
+  await firebaseAuthProvider.sendEmailVerification({
+    idToken: firebaseAccount.idToken,
+    locale: body.locale
+  });
+  sendJson(res, 200, {
+    requiresVerification: true,
+    email: firebaseAccount.email,
+    verificationMethod: "link"
+  });
+}
+
+async function mutateIsolatedStore(handler, { maxAttempts = 3 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const repository = createStoreRepository();
+    const requestStore = await operationWithTimeout(
+      repository.load(createSeedStore()),
+      8_000,
+      "database_read_timeout",
+      "Database read timed out"
+    );
+    try {
+      const result = await handler(requestStore);
+      await operationWithTimeout(
+        repository.save(requestStore),
+        8_000,
+        "database_write_timeout",
+        "Database write timed out"
+      );
+      storeLastRefreshedAt = 0;
+      return result;
+    } catch (error) {
+      if (error?.code !== "database_write_conflict" || attempt === maxAttempts) throw error;
+    }
+  }
+  throw problem(409, "database_write_conflict", "Database state changed during authentication");
+}
+
+function operationWithTimeout(operation, timeoutMs, code, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(problem(504, code, message)), timeoutMs);
+  });
+  return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function initializeStore() {
+  if (store) return store;
+  if (!storeInitialization) {
+    storeInitialization = (async () => {
+      const loadedStore = await storeRepository.load(createSeedStore());
+      const translationsChanged = repairKnownTranslations(loadedStore);
+      const fixedAdminChanged = enforceFixedAdminAccount(loadedStore);
+      const operationalStateChanged = repairOperationalState(loadedStore);
+      const storeNeedsSave = translationsChanged || fixedAdminChanged || operationalStateChanged;
+      const productionStoreChanged = hardenProductionStore(loadedStore);
+      if (storeNeedsSave || productionStoreChanged) {
+        await storeRepository.save(loadedStore);
+      }
+      store = loadedStore;
+      storeLastRefreshedAt = Date.now();
+      return store;
+    })().catch((error) => {
+      storeInitialization = null;
+      throw error;
+    });
+  }
+  return storeInitialization;
+}
+
+async function refreshStore({ force = false } = {}) {
+  await initializeStore();
+  if (
+    !storeRepository.enabled
+    || (!force && Date.now() - storeLastRefreshedAt < storeRefreshTtlMs)
+  ) {
+    return store;
+  }
+  if (!storeRefreshPromise) {
+    storeRefreshPromise = (async () => {
+      const latestStore = await storeRepository.load(createSeedStore());
+      restoreStore(store, latestStore);
+      storeLastRefreshedAt = Date.now();
+      return store;
+    })().finally(() => {
+      storeRefreshPromise = null;
+    });
+  }
+  return storeRefreshPromise;
+}
 
 server.listen(port, () => {
   console.log(`Good Vibe Pilates & Yoga API listening on http://localhost:${port}`);
@@ -170,7 +403,105 @@ async function routeApi(req, res, url, body, auth) {
   const locale = url.searchParams.get("locale") ?? auth?.locale ?? "en";
 
   if (method === "POST" && pathName === "/auth/login") {
-    sendJson(res, 200, login(store, body, signToken));
+    if (!usesFirebaseAuth) {
+      sendJson(res, 200, login(store, body, signToken));
+      return;
+    }
+    const firebaseAccount = await firebaseAuthProvider.signIn({
+      email: normalizeIdentity(body.identifier ?? body.email),
+      password: body.password,
+      locale: body.locale
+    });
+    const response = loginWithFirebaseUser(store, firebaseAccount, body, signToken);
+    sendJson(res, 200, {
+      ...response,
+      firebase: {
+        idToken: firebaseAccount.idToken,
+        refreshToken: firebaseAccount.refreshToken,
+        expiresIn: firebaseAccount.expiresIn
+      }
+    });
+    return;
+  }
+
+  if (method === "POST" && pathName === "/auth/register") {
+    if (usesFirebaseAuth) {
+      const registration = prepareFirebaseRegistration(store, body);
+      const firebaseAccount = await firebaseAuthProvider.signUp(registration);
+      let response;
+      try {
+        response = registerFirebaseUser(store, registration, firebaseAccount.uid);
+        await firebaseAuthProvider.sendEmailVerification({
+          idToken: firebaseAccount.idToken,
+          locale: registration.locale
+        });
+      } catch (error) {
+        discardPendingRegistration(store, store.authIdentities.find((item) => item.firebaseUid === firebaseAccount.uid)?.userId);
+        await firebaseAuthProvider.deleteCurrentUser({ idToken: firebaseAccount.idToken }).catch(() => null);
+        throw error;
+      }
+      sendJson(res, 201, response);
+      return;
+    }
+    if (!emailProvider.enabled) throw problem(503, "email_service_not_configured", "Email delivery is not configured");
+    const registration = register(store, body, signToken);
+    try {
+      await emailProvider.sendVerification({
+        to: registration.delivery.email,
+        code: registration.delivery.code,
+        locale: body.locale
+      });
+    } catch (error) {
+      discardPendingRegistration(store, registration.userId);
+      throw error;
+    }
+    sendJson(res, 201, registration.response);
+    return;
+  }
+
+  if (method === "POST" && pathName === "/auth/email/verify") {
+    if (usesFirebaseAuth) {
+      throw problem(410, "verification_link_required", "Open the Firebase verification link in your email, then sign in again");
+    }
+    sendJson(res, 200, verifyEmailRegistration(store, body, signToken));
+    return;
+  }
+
+  if (method === "POST" && pathName === "/auth/email/resend") {
+    if (usesFirebaseAuth) {
+      const firebaseAccount = await firebaseAuthProvider.signIn({
+        email: normalizeIdentity(body.email),
+        password: body.password,
+        locale: body.locale
+      });
+      if (firebaseAccount.emailVerified) {
+        throw problem(409, "email_already_verified", "Email is already verified");
+      }
+      await firebaseAuthProvider.sendEmailVerification({
+        idToken: firebaseAccount.idToken,
+        locale: body.locale
+      });
+      sendJson(res, 200, {
+        requiresVerification: true,
+        email: firebaseAccount.email,
+        verificationMethod: "link"
+      });
+      return;
+    }
+    if (!emailProvider.enabled) throw problem(503, "email_service_not_configured", "Email delivery is not configured");
+    const previousChallenges = structuredClone(store.emailVerificationChallenges);
+    const verification = resendEmailVerification(store, body);
+    try {
+      await emailProvider.sendVerification({
+        to: verification.delivery.email,
+        code: verification.delivery.code,
+        locale: body.locale
+      });
+    } catch (error) {
+      store.emailVerificationChallenges = previousChallenges;
+      throw error;
+    }
+    sendJson(res, 200, verification.response);
     return;
   }
 
@@ -185,25 +516,94 @@ async function routeApi(req, res, url, body, auth) {
     return;
   }
 
-  if (method === "GET" && pathName === "/home") {
+  if (method === "POST" && pathName === "/me/avatar-upload") {
+    requireAuth(auth);
+    sendJson(res, 200, await createAvatarUpload(body, auth));
+    return;
+  }
+
+  if (method === "PATCH" && pathName === "/me/avatar") {
+    requireAuth(auth);
+    const objectKey = String(body.objectKey ?? "");
+    const objectPrefix = `avatars/${sanitizeFileName(auth.userId)}/`;
+    if (!objectKey.startsWith(objectPrefix) || objectKey.slice(objectPrefix.length).includes("/")) {
+      throw problem(400, "invalid_avatar_object", "Avatar object key is invalid");
+    }
+    if (storageUploadProvider.kind === "memory") {
+      const upload = mockUploads.get(objectKey);
+      if (!upload || upload.body === null) {
+        throw problem(409, "avatar_upload_incomplete", "Upload the avatar image before saving it");
+      }
+    }
+    const user = byIdRequired(store.users, auth.userId, "user_not_found");
+    user.avatarUrl = publicUrlForObjectKey(objectKey);
+    user.avatarObjectKey = objectKey;
+    user.updatedAt = new Date().toISOString();
+    audit(store, auth, "profile.avatar.updated", user.id, { objectKey });
+    sendJson(res, 200, getCurrentUser(store, auth).user);
+    return;
+  }
+
+  if (method === "GET" && pathName === "/legal") {
+    const origin = baseUrl().replace(/\/+$/, "");
     sendJson(res, 200, {
-      banners: store.contentBlocks.filter((item) => item.type === "banner" && item.active).map((item) => localizeEntity(item, locale)),
-      features: store.contentBlocks.filter((item) => item.type === "feature" && item.active).map((item) => localizeEntity(item, locale)),
-      knowledge: store.contentBlocks.filter((item) => item.type === "knowledge" && item.active).map((item) => localizeEntity(item, locale)),
-      recommendedCourses: store.courses.map((item) => localizeEntity(item, locale)),
+      privacyPolicyUrl: `${origin}/privacy`,
+      privacyChoicesUrl: `${origin}/privacy-choices`,
+      termsUrl: `${origin}/terms`,
+      supportUrl: `${origin}/support`,
+      region: "California, US",
+      timezone: "America/Los_Angeles"
+    });
+    return;
+  }
+
+  if (method === "POST" && pathName === "/privacy/requests") {
+    requireAuth(auth);
+    sendJson(res, 201, createPrivacyRequest(store, auth, body));
+    return;
+  }
+
+  if (method === "GET" && pathName === "/privacy/export") {
+    requireAuth(auth);
+    sendJson(res, 200, exportPrivacyData(store, auth));
+    return;
+  }
+
+  if (method === "POST" && pathName === "/privacy/account-deletion") {
+    requireAuth(auth);
+    const result = deleteAccount(store, auth);
+    if (usesFirebaseAuth) {
+      const refreshed = await firebaseAuthProvider.refreshSession({ refreshToken: body.firebaseRefreshToken });
+      await firebaseAuthProvider.deleteCurrentUser({ idToken: refreshed.idToken });
+    }
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (method === "GET" && pathName === "/home") {
+    const activeCourses = store.courses.filter(isActiveEntity);
+    const activeProducts = store.products.filter(isActiveEntity);
+    const activeContent = store.contentBlocks
+      .filter((item) => item.active)
+      .toSorted((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0));
+    sendJson(res, 200, {
+      banners: activeContent.filter((item) => item.type === "banner").map((item) => localizeEntity(item, locale)),
+      features: activeContent.filter((item) => item.type === "feature").map((item) => localizeEntity(item, locale)),
+      knowledge: activeContent.filter((item) => item.type === "knowledge").map((item) => localizeEntity(item, locale)),
+      recommendedCourses: activeCourses.map((item) => localizeEntity(item, locale)),
       recommendedCoaches: store.coaches.map((item) => localizeEntity(item, locale)),
-      storeRecommendations: store.products.map((item) => localizeEntity(item, locale))
+      storeRecommendations: activeProducts.map((item) => localizeEntity(item, locale))
     });
     return;
   }
 
   if (method === "GET" && pathName === "/courses") {
-    sendJson(res, 200, store.courses.map((item) => localizeEntity(item, locale)));
+    sendJson(res, 200, store.courses.filter(isActiveEntity).map((item) => localizeEntity(item, locale)));
     return;
   }
 
   if (method === "GET" && segments[0] === "courses" && segments[1]) {
-    const course = store.courses.find((item) => item.id === segments[1]);
+    const course = store.courses.find((item) => item.id === segments[1] && isActiveEntity(item));
     if (!course) throw problem(404, "course_not_found", "Course not found");
     sendJson(res, 200, localizeEntity(course, locale));
     return;
@@ -224,14 +624,17 @@ async function routeApi(req, res, url, body, auth) {
   if (method === "GET" && pathName === "/availability") {
     const coachId = url.searchParams.get("coachId");
     const courseId = url.searchParams.get("courseId");
+    const activeCourseIds = new Set(store.courses.filter(isActiveEntity).map((course) => course.id));
     const sessions = store.courseSessions
       .filter((session) => !coachId || session.coachId === coachId)
       .filter((session) => !courseId || session.courseId === courseId)
-      .filter((session) => session.status === "open")
+      .filter((session) => activeCourseIds.has(session.courseId))
+      .filter((session) => effectiveCourseSessionStatus(session) === "open")
       .filter((session) => new Date(session.startsAt).getTime() > Date.now())
+      .toSorted((left, right) => new Date(left.startsAt) - new Date(right.startsAt))
       .map((session) => ({
         ...session,
-        remainingCapacity: session.capacity - session.bookedCount,
+        remainingCapacity: Math.max(0, session.capacity - session.bookedCount),
         course: localizeEntity(store.courses.find((course) => course.id === session.courseId), locale),
         coach: localizeEntity(store.coaches.find((coach) => coach.id === session.coachId), locale),
         participants: sessionParticipants(session.id),
@@ -315,6 +718,12 @@ async function routeApi(req, res, url, body, auth) {
     return;
   }
 
+  if (method === "POST" && segments[0] === "member-cards" && segments[2] === "cancel-request") {
+    requireAuth(auth);
+    sendJson(res, 201, requestMembershipCancellation(store, auth, segments[1], body));
+    return;
+  }
+
   if (method === "POST" && segments[0] === "member-cards" && ["freeze", "extend", "transfer", "upgrade"].includes(segments[2])) {
     requireAuth(auth);
     sendJson(res, 200, memberCardOperation(store, auth, segments[1], segments[2], body));
@@ -322,7 +731,7 @@ async function routeApi(req, res, url, body, auth) {
   }
 
   if (method === "GET" && pathName === "/products") {
-    sendJson(res, 200, store.products.map((item) => localizeEntity(item, locale)));
+    sendJson(res, 200, store.products.filter(isActiveEntity).map((item) => localizeEntity(item, locale)));
     return;
   }
 
@@ -355,9 +764,10 @@ async function routeApi(req, res, url, body, auth) {
 
   if (method === "GET" && pathName === "/payments/methods") {
     sendJson(res, 200, getPaymentMethods({
-      currency: url.searchParams.get("currency") ?? "HKD",
-      country: url.searchParams.get("country") ?? "HK",
-      recurring: url.searchParams.get("recurring") === "true"
+      currency: url.searchParams.get("currency") ?? "USD",
+      country: url.searchParams.get("country") ?? "US",
+      recurring: url.searchParams.get("recurring") === "true",
+      all: url.searchParams.get("scope") === "all"
     }));
     return;
   }
@@ -447,7 +857,8 @@ async function routeApi(req, res, url, body, auth) {
           methodCode: paymentRequest.methodCode,
           orderId: paymentRequest.orderId,
           productName: body.productName ?? "Good Vibe Pilates & Yoga",
-          successUrl: paymentReturnUrl("success", returnLocale),
+          customerEmail: user?.email,
+          successUrl: paymentReturnUrl("success", returnLocale, { includeCheckoutSession: true }),
           cancelUrl: paymentReturnUrl("cancel", returnLocale),
           idempotencyKey: stripeCreationIdempotencyKey("checkout", auth, body.orderId, req.headers["idempotency-key"])
         });
@@ -514,6 +925,7 @@ function routeStaff(req, res, pathName, url, body, locale) {
       .filter((session) => new Date(session.startsAt) >= start && new Date(session.startsAt) < end)
       .map((session) => ({
         ...session,
+        status: effectiveCourseSessionStatus(session),
         course: localizeEntity(store.courses.find((course) => course.id === session.courseId), locale),
         coach: localizeEntity(store.coaches.find((coach) => coach.id === session.coachId), locale),
         bookings: enrichBookings(store.bookings.filter((booking) => booking.courseSessionId === session.id), locale)
@@ -572,13 +984,13 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
       const updates = allowed(body, ["name", "email", "phone", "locale", "roles"]);
       if (Object.hasOwn(updates, "roles")) {
         updates.roles = normalizeRoles(updates.roles);
-        ensureAdminRoleRemovalAllowed(user, updates.roles);
       }
       if (Object.hasOwn(updates, "email")) {
         const email = normalizeIdentity(updates.email);
         if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
           throw problem(400, "invalid_email", "email must be a valid address");
         }
+        ensureFixedAdminMutationAllowed(user, updates.roles ?? user.roles, { nextEmail: email });
         const duplicateIdentity = store.authIdentities.find((identity) => (
           identity.type === "email" && identity.value === email && identity.userId !== user.id
         ));
@@ -589,6 +1001,8 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
         }
         for (const identity of identities) identity.value = email;
         updates.email = email;
+      } else if (Object.hasOwn(updates, "roles")) {
+        ensureFixedAdminMutationAllowed(user, updates.roles);
       }
       Object.assign(user, updates, { updatedAt: new Date().toISOString() });
       if (Object.hasOwn(updates, "roles")) revokeInvalidRoleSessions(user.id, user.roles);
@@ -634,7 +1048,9 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
   if (!collection) throw problem(404, "admin_resource_not_found", "Admin resource not found");
 
   if (req.method === "GET" && !idValue) {
-    sendJson(res, 200, resource === "payments" ? collection.map(enrichAdminPayment) : collection);
+    sendJson(res, 200, resource === "payments"
+      ? collection.map(enrichAdminPayment)
+      : collection.map((item) => adminEntityForResponse(resource, item)));
     return;
   }
 
@@ -648,6 +1064,7 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
       if (collection.some((candidate) => candidate.id === entity.id)) {
         throw problem(409, "duplicate_entity_id", "An entity with this id already exists");
       }
+      if (resource === "users") ensureFixedAdminMutationAllowed(entity, entity.roles);
       collection.push(entity);
       audit(store, adminAuth, `admin.${resource}.create`, entity.id, body);
       return entity;
@@ -659,7 +1076,9 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
   if (index < 0) throw problem(404, "admin_entity_not_found", "Admin entity not found");
 
   if (req.method === "GET") {
-    sendJson(res, 200, resource === "payments" ? enrichAdminPayment(collection[index]) : collection[index]);
+    sendJson(res, 200, resource === "payments"
+      ? enrichAdminPayment(collection[index])
+      : adminEntityForResponse(resource, collection[index]));
     return;
   }
 
@@ -670,7 +1089,9 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
         ...body,
         updatedAt: new Date().toISOString()
       });
-      if (resource === "users") ensureAdminRoleRemovalAllowed(collection[index], updated.roles);
+      if (resource === "users") {
+        ensureFixedAdminMutationAllowed(collection[index], updated.roles, { nextEmail: updated.email });
+      }
       collection[index] = updated;
       if (resource === "users") revokeInvalidRoleSessions(collection[index].id, collection[index].roles);
       audit(store, adminAuth, `admin.${resource}.update`, collection[index].id, body);
@@ -681,7 +1102,7 @@ async function routeAdmin(req, res, segments, body, adminAuth) {
 
   if (req.method === "DELETE") {
     requireAdminIdempotency(req, `admin.${resource}.delete`, () => {
-      if (resource === "users") ensureAdminRoleRemovalAllowed(collection[index], []);
+      if (resource === "users") ensureFixedAdminMutationAllowed(collection[index], [], { deleting: true });
       const [deleted] = collection.splice(index, 1);
       if (resource === "users") revokeInvalidRoleSessions(deleted.id, []);
       audit(store, adminAuth, `admin.${resource}.delete`, deleted.id, {});
@@ -707,6 +1128,8 @@ function adminCollection(resource) {
     reviews: store.reviews,
     "body-metrics": store.bodyMetrics,
     "content-blocks": store.contentBlocks,
+    "privacy-requests": store.privacyRequests,
+    "membership-cancellation-requests": store.membershipCancellationRequests,
     "audit-logs": store.auditLogs
   };
   return map[resource];
@@ -719,7 +1142,7 @@ function adminDashboard() {
   const todaySessions = store.courseSessions.filter((session) => {
     const startsAt = new Date(session.startsAt);
     return startsAt >= todayStart && startsAt < todayEnd;
-  });
+  }).map((session) => adminEntityForResponse("course-sessions", session));
   return {
     metrics: {
       members: store.users.filter((user) => user.roles.includes(ROLES.STUDENT)).length,
@@ -837,11 +1260,32 @@ function allowed(source, keys) {
   return Object.fromEntries(Object.entries(source).filter(([key]) => keys.includes(key)));
 }
 
+function isActiveEntity(entity) {
+  return entity?.active !== false;
+}
+
+function adminEntityForResponse(resource, entity) {
+  if (resource !== "course-sessions") return entity;
+  return {
+    ...entity,
+    status: effectiveCourseSessionStatus(entity)
+  };
+}
+
 function normalizeAdminEntity(resource, source, { isCreate = false } = {}) {
   const entity = { ...source };
   if (resource === "users") entity.roles = normalizeRoles(entity.roles);
+  if (["courses", "products", "content-blocks"].includes(resource) && isCreate && entity.active === undefined) {
+    entity.active = true;
+  }
+  if (resource === "courses" && entity.imageUrl !== undefined) {
+    entity.imageUrl = normalizeCourseImageUrl(entity.imageUrl);
+  }
   if (resource === "course-sessions" && isCreate && entity.bookedCount === undefined) {
     entity.bookedCount = 0;
+  }
+  if (resource === "course-sessions" && isCreate && entity.status === undefined) {
+    entity.status = "open";
   }
   const positiveFields = {
     courses: ["durationMinutes", "priceAmount", "capacity", "memberCardDeductCount"],
@@ -879,6 +1323,9 @@ function normalizeAdminEntity(resource, source, { isCreate = false } = {}) {
   if (resource === "course-sessions") {
     byIdRequired(store.courses, entity.courseId, "course_not_found");
     byIdRequired(store.coaches, entity.coachId, "coach_not_found");
+    if (!["draft", "open", "closed", "cancelled"].includes(entity.status)) {
+      throw problem(400, "invalid_session_status", "status must be draft, open, closed, or cancelled");
+    }
     const startsAt = new Date(entity.startsAt).getTime();
     const endsAt = new Date(entity.endsAt).getTime();
     if (!Number.isFinite(startsAt) || !Number.isFinite(endsAt) || endsAt <= startsAt) {
@@ -887,12 +1334,28 @@ function normalizeAdminEntity(resource, source, { isCreate = false } = {}) {
     if (isCreate && startsAt <= Date.now()) {
       throw problem(409, "session_started", "New course sessions must start in the future");
     }
+    entity.status = effectiveCourseSessionStatus(entity);
   }
   if (resource === "member-cards") {
     byIdRequired(store.users, entity.userId, "user_not_found");
     if (entity.planId) byIdRequired(store.membershipPlans, entity.planId, "membership_plan_not_found");
   }
   return entity;
+}
+
+function normalizeCourseImageUrl(value) {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return null;
+  let url;
+  try {
+    url = new URL(candidate);
+  } catch {
+    throw problem(400, "invalid_course_image_url", "Course image URL must be a valid HTTP or HTTPS URL");
+  }
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw problem(400, "invalid_course_image_url", "Course image URL must use HTTP or HTTPS");
+  }
+  return url.toString();
 }
 
 function normalizeRoles(value) {
@@ -903,14 +1366,18 @@ function normalizeRoles(value) {
   return [...new Set(value)];
 }
 
-function ensureAdminRoleRemovalAllowed(user, nextRoles) {
-  if (!user.roles?.includes(ROLES.ADMIN) || nextRoles.includes(ROLES.ADMIN)) return;
-  const adminCount = store.users.filter((candidate) => (
-    candidate.roles?.includes(ROLES.ADMIN)
-    && store.authIdentities.some((identity) => identity.userId === candidate.id)
-  )).length;
-  if (adminCount <= 1) {
-    throw problem(409, "last_admin_required", "The last admin role cannot be removed");
+function ensureFixedAdminMutationAllowed(user, nextRoles, { nextEmail, deleting = false } = {}) {
+  if (user.id === FIXED_ADMIN_USER_ID) {
+    if (deleting || !nextRoles.includes(ROLES.ADMIN)) {
+      throw problem(409, "last_admin_required", "The fixed administrator account cannot be removed");
+    }
+    if (nextEmail !== undefined && normalizeIdentity(nextEmail) !== normalizeIdentity(user.email)) {
+      throw problem(409, "fixed_admin_identity", "The fixed administrator email cannot be changed");
+    }
+    return;
+  }
+  if (nextRoles.includes(ROLES.ADMIN)) {
+    throw problem(409, "fixed_admin_only", "Administrator access belongs only to the fixed administrator account");
   }
 }
 
@@ -937,12 +1404,62 @@ function sanitizeFileName(value) {
 
 async function createAdminUpload(body) {
   const scope = sanitizeFileName(body.scope ?? "admin").replace(/^\.+$/, "admin") || "admin";
+  const contentType = String(body.contentType ?? "application/octet-stream").toLowerCase().split(";")[0].trim();
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+  if ((scope === "courses" || contentType.startsWith("image/")) && !allowedTypes.has(contentType)) {
+    throw problem(400, "invalid_upload_type", "Upload must be a JPEG, PNG, WebP, HEIC, or HEIF image");
+  }
+  const fileSize = Number(body.fileSize ?? 0);
+  if (fileSize && (!Number.isSafeInteger(fileSize) || fileSize < 1 || fileSize > 10_000_000)) {
+    throw problem(413, "upload_too_large", "Image must be 10 MB or smaller");
+  }
   const objectKey = `${scope}/${Date.now()}-${sanitizeFileName(body.fileName ?? "upload.bin")}`;
+  return createUpload(objectKey, contentType);
+}
+
+async function createAvatarUpload(body, auth) {
+  const contentType = String(body.contentType ?? "").toLowerCase().split(";")[0].trim();
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+  if (!allowedTypes.has(contentType)) {
+    throw problem(400, "invalid_avatar_type", "Avatar must be a JPEG, PNG, WebP, HEIC, or HEIF image");
+  }
+  const fileSize = Number(body.fileSize ?? 0);
+  if (fileSize && (!Number.isSafeInteger(fileSize) || fileSize < 1 || fileSize > 10_000_000)) {
+    throw problem(413, "avatar_too_large", "Avatar image must be 10 MB or smaller");
+  }
+  const extension = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/heic": "heic",
+    "image/heif": "heif"
+  }[contentType];
+  const objectKey = `avatars/${sanitizeFileName(auth.userId)}/${Date.now()}-${crypto.randomBytes(8).toString("hex")}.${extension}`;
+  return createUpload(objectKey, contentType);
+}
+
+async function createUpload(objectKey, contentType) {
+  if (cloudflareMediaBucket && isAllowedMediaObjectKey(objectKey)) {
+    const uploadPath = objectKey.startsWith("avatars/")
+      ? "/api/v1/me/avatar-upload/"
+      : "/api/v1/admin/uploads/";
+    return {
+      storage: "r2",
+      objectKey,
+      uploadUrl: `${baseUrl()}${uploadPath}${encodeURIComponent(objectKey)}`,
+      publicUrl: `${baseUrl()}/assets/${encodeURIComponent(objectKey)}`,
+      headers: { "Content-Type": contentType },
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString()
+    };
+  }
   if (storageUploadProvider.enabled || storageUploadProvider.kind === "misconfigured") {
-    return storageUploadProvider.createSignedUpload({ objectKey });
+    return storageUploadProvider.createSignedUpload({
+      objectKey,
+      contentType
+    });
   }
   if (process.env.NODE_ENV === "production") {
-    throw problem(503, "storage_not_configured", "SUPABASE_STORAGE_BUCKET must be configured for production uploads");
+    throw problem(503, "storage_not_configured", "Durable cloud storage must be configured for production uploads");
   }
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
   const upload = {
@@ -954,6 +1471,21 @@ async function createAdminUpload(body) {
   };
   mockUploads.set(objectKey, { body: null, contentType: "application/octet-stream", expiresAt: expiresAt.getTime() });
   return upload;
+}
+
+function publicUrlForObjectKey(objectKey) {
+  if (cloudflareMediaBucket && isAllowedMediaObjectKey(objectKey)) {
+    return `${baseUrl()}/assets/${encodeURIComponent(objectKey)}`;
+  }
+  if (storageUploadProvider.enabled || storageUploadProvider.kind === "misconfigured") {
+    return storageUploadProvider.publicUrlFor(objectKey);
+  }
+  return `${baseUrl()}/assets/${encodeURIComponent(objectKey)}`;
+}
+
+function isAllowedMediaObjectKey(objectKey) {
+  if (objectKey.includes("..") || objectKey.includes("\\") || objectKey.includes("\0")) return false;
+  return ["avatars/", "courses/", "content/"].some((prefix) => objectKey.startsWith(prefix));
 }
 
 function enrichBookings(bookings, locale) {
@@ -1052,10 +1584,10 @@ function stripeCreationIdempotencyKey(flow, auth, orderId, clientKey) {
   return `good-vibe-${flow}-${digest}`;
 }
 
-async function acquireMutationLock() {
-  const previous = mutationLockTail;
+async function acquireStoreLock() {
+  const previous = storeLockTail;
   let release;
-  mutationLockTail = new Promise((resolve) => {
+  storeLockTail = new Promise((resolve) => {
     release = resolve;
   });
   await previous.catch(() => {});
@@ -1178,15 +1710,50 @@ async function readJson(req) {
 function readRawBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
-    req.setEncoding("utf8");
-    req.on("data", (chunk) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      finish(reject, problem(408, "request_body_timeout", "Request body timed out"));
+    }, 10_000);
+
+    function cleanup() {
+      clearTimeout(timer);
+      req.off("data", onData);
+      req.off("end", onEnd);
+      req.off("error", onError);
+      req.off("aborted", onAborted);
+    }
+
+    function finish(handler, value) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      handler(value);
+    }
+
+    function onData(chunk) {
       raw += chunk;
       if (raw.length > 2_000_000) {
-        reject(problem(413, "payload_too_large", "Payload too large"));
+        finish(reject, problem(413, "payload_too_large", "Payload too large"));
       }
-    });
-    req.on("end", () => resolve(raw));
-    req.on("error", reject);
+    }
+
+    function onEnd() {
+      finish(resolve, raw);
+    }
+
+    function onError(error) {
+      finish(reject, error);
+    }
+
+    function onAborted() {
+      finish(reject, problem(400, "request_aborted", "Request was aborted"));
+    }
+
+    req.setEncoding("utf8");
+    req.on("data", onData);
+    req.on("end", onEnd);
+    req.on("error", onError);
+    req.on("aborted", onAborted);
   });
 }
 
@@ -1207,6 +1774,66 @@ function readBinaryBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
+}
+
+async function receiveCloudflareMediaUpload(req, res, url, auth) {
+  requireAuth(auth);
+  if (!cloudflareMediaBucket || typeof cloudflareMediaBucket.put !== "function") {
+    throw problem(503, "storage_not_configured", "Cloudflare R2 media storage is not configured");
+  }
+
+  const isAvatarUpload = url.pathname.startsWith("/api/v1/me/avatar-upload/");
+  const uploadPrefix = isAvatarUpload ? "/api/v1/me/avatar-upload/" : "/api/v1/admin/uploads/";
+  let objectKey;
+  try {
+    objectKey = decodeURIComponent(url.pathname.slice(uploadPrefix.length));
+  } catch {
+    throw problem(400, "invalid_media_object", "Media object key is invalid");
+  }
+
+  if (isAvatarUpload) {
+    const objectPrefix = `avatars/${sanitizeFileName(auth.userId)}/`;
+    if (!objectKey.startsWith(objectPrefix) || objectKey.slice(objectPrefix.length).includes("/")) {
+      throw problem(400, "invalid_avatar_object", "Avatar object key is invalid");
+    }
+  } else {
+    requireRole(auth, [ROLES.ADMIN]);
+    const validAdminKey = ["courses/", "content/"].some(
+      (prefix) => objectKey.startsWith(prefix) && !objectKey.slice(prefix.length).includes("/")
+    );
+    if (!validAdminKey || !isAllowedMediaObjectKey(objectKey)) {
+      throw problem(400, "invalid_media_object", "Media object key is invalid");
+    }
+  }
+
+  const contentType = String(req.headers["content-type"] ?? "").toLowerCase().split(";")[0].trim();
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+  if (!allowedTypes.has(contentType)) {
+    throw problem(400, "invalid_avatar_type", "Avatar must be a JPEG, PNG, WebP, HEIC, or HEIF image");
+  }
+  const declaredSize = Number(req.headers["content-length"] ?? 0);
+  if (declaredSize > 10_000_000) {
+    throw problem(413, "avatar_too_large", "Avatar image must be 10 MB or smaller");
+  }
+  const body = await readBinaryBody(req);
+  if (!body.length) throw problem(400, "empty_avatar", "Avatar image is empty");
+  if (body.length > 10_000_000) {
+    throw problem(413, "avatar_too_large", "Avatar image must be 10 MB or smaller");
+  }
+
+  await cloudflareMediaBucket.put(objectKey, body, {
+    httpMetadata: { contentType },
+    customMetadata: {
+      actorUserId: auth.userId,
+      scope: objectKey.split("/", 1)[0]
+    }
+  });
+  res.goodVibeDeferJson = false;
+  res.writeHead(204, {
+    "Cache-Control": "no-store",
+    "X-Content-Type-Options": "nosniff"
+  });
+  res.end();
 }
 
 async function serveMockUpload(req, res, url) {
@@ -1293,8 +1920,8 @@ function contentTypeFor(ext) {
 }
 
 function sendJson(res, status, payload) {
-  if (res.yomiDeferJson) {
-    res.yomiPendingJson = { status, payload };
+  if (res.goodVibeDeferJson) {
+    res.goodVibePendingJson = { status, payload };
     return;
   }
   writeJson(res, status, payload);
@@ -1307,7 +1934,7 @@ function servePaymentReturnBridge(res, url) {
     : "pending";
   const locale = normalizePaymentReturnLocale(url.searchParams.get("locale"));
   const copy = paymentReturnCopy(locale)[status];
-  const deepLink = new URL("yomiyoga://payment-return");
+  const deepLink = new URL("goodvibe://payment-return");
   deepLink.searchParams.set("status", status);
   deepLink.searchParams.set("locale", locale);
   const sessionId = url.searchParams.get("session_id");
@@ -1428,11 +2055,14 @@ function writeJson(res, status, payload) {
 }
 
 async function persistAndFlush(res) {
-  const pending = res.yomiPendingJson;
+  const pending = res.goodVibePendingJson;
   if (!pending) return;
-  if (pending.status < 400) await storeRepository.save(store);
-  res.yomiDeferJson = false;
-  res.yomiPendingJson = null;
+  if (pending.status < 400) {
+    await storeRepository.save(store);
+    storeLastRefreshedAt = Date.now();
+  }
+  res.goodVibeDeferJson = false;
+  res.goodVibePendingJson = null;
   writeJson(res, pending.status, pending.payload);
 }
 
@@ -1463,10 +2093,11 @@ function baseUrl() {
     ?? `http://localhost:${port}`;
 }
 
-function paymentReturnUrl(status, locale = "en") {
+function paymentReturnUrl(status, locale = "en", { includeCheckoutSession = false } = {}) {
   const url = new URL("/payments/return", `${baseUrl().replace(/\/+$/, "")}/`);
   url.searchParams.set("status", status);
   url.searchParams.set("locale", normalizePaymentReturnLocale(locale));
+  if (includeCheckoutSession) url.searchParams.set("session_id", "{CHECKOUT_SESSION_ID}");
   return url.toString();
 }
 
@@ -1478,21 +2109,49 @@ function isInsideDirectory(rootDir, candidate) {
 function assertProductionConfiguration() {
   if (process.env.NODE_ENV !== "production") return;
 
+  const firebaseApiKey = globalThis.__GOOD_VIBE_FIREBASE_WEB_API_KEY__ ?? process.env.FIREBASE_WEB_API_KEY;
+  if (String(process.env.AUTH_PROVIDER ?? "local").toLowerCase() === "firebase" && !firebaseApiKey?.trim()) {
+    throw new Error("FIREBASE_WEB_API_KEY is required when AUTH_PROVIDER=firebase");
+  }
+
   const required = [
     "APP_BASE_URL",
     "APP_SECRET",
-    "SUPABASE_URL",
-    "SUPABASE_SECRET_KEY",
     "STRIPE_SECRET_KEY",
     "STRIPE_PUBLISHABLE_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "STRIPE_MERCHANT_IDENTIFIER",
+    "COACH_INVITE_CODE",
     "INITIAL_ADMIN_EMAIL",
-    "INITIAL_ADMIN_PASSWORD"
+    "INITIAL_ADMIN_PASSWORD",
+    "LEGAL_OPERATOR_NAME",
+    "LEGAL_POSTAL_ADDRESS",
+    "PRIVACY_EMAIL",
+    "SUPPORT_EMAIL"
   ];
   const missing = required.filter((name) => !process.env[name]?.trim());
   if (missing.length) {
     throw new Error(`Missing production environment variables: ${missing.join(", ")}`);
+  }
+  const cloudProvider = String(process.env.CLOUD_PROVIDER ?? "").toLowerCase();
+  if (cloudProvider === "alibaba") {
+    const alibabaRequired = [
+      "DATABASE_URL",
+      "OSS_REGION",
+      "OSS_ACCESS_KEY_ID",
+      "OSS_ACCESS_KEY_SECRET",
+      "OSS_BUCKET",
+      "OSS_PUBLIC_BASE_URL"
+    ];
+    const missingAlibaba = alibabaRequired.filter((name) => !process.env[name]?.trim());
+    if (missingAlibaba.length) {
+      throw new Error(`Missing Alibaba Cloud production environment variables: ${missingAlibaba.join(", ")}`);
+    }
+  } else if (!process.env.DATABASE_URL?.trim()) {
+    const hasSupabase = process.env.SUPABASE_URL?.trim() && process.env.SUPABASE_SECRET_KEY?.trim();
+    if (!hasSupabase) {
+      throw new Error("Production persistence requires DATABASE_URL or SUPABASE_URL with SUPABASE_SECRET_KEY");
+    }
   }
   if (!process.env.APP_BASE_URL.startsWith("https://")) {
     throw new Error("APP_BASE_URL must use HTTPS in production");
@@ -1500,10 +2159,47 @@ function assertProductionConfiguration() {
   if (process.env.APP_SECRET.length < 32) {
     throw new Error("APP_SECRET must contain at least 32 characters in production");
   }
-  if (process.env.INITIAL_ADMIN_PASSWORD === "Yomi@2026" || process.env.INITIAL_ADMIN_PASSWORD.length < 12) {
+  if (process.env.COACH_INVITE_CODE.length < 12) {
+    throw new Error("COACH_INVITE_CODE must contain at least 12 characters in production");
+  }
+  if (process.env.INITIAL_ADMIN_PASSWORD === "GoodVibe@2026" || process.env.INITIAL_ADMIN_PASSWORD.length < 12) {
     throw new Error("INITIAL_ADMIN_PASSWORD must be unique and contain at least 12 characters");
   }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(process.env.INITIAL_ADMIN_EMAIL)) {
     throw new Error("INITIAL_ADMIN_EMAIL must be a valid email address");
   }
+}
+
+function serveLegalPage(res, pagePath) {
+  const operator = escapeHtml(process.env.LEGAL_OPERATOR_NAME ?? "Good Vibe Pilates & Yoga");
+  const address = escapeHtml(process.env.LEGAL_POSTAL_ADDRESS ?? "California, United States");
+  const privacyEmail = escapeHtml(process.env.PRIVACY_EMAIL ?? "privacy@goodvibepilatesyoga.com");
+  const supportEmail = escapeHtml(process.env.SUPPORT_EMAIL ?? "support@goodvibepilatesyoga.com");
+  const effectiveDate = escapeHtml(process.env.LEGAL_EFFECTIVE_DATE ?? "July 16, 2026");
+  const pages = {
+    "/privacy": {
+      title: "Privacy Policy",
+      body: `<p>We collect account, booking, payment, device, and optional wellness information to operate Good Vibe Pilates & Yoga. Payment card details are processed by Stripe and are not stored by us.</p><p>You may request access, correction, deletion, or restriction from the app. We retain transaction and safety records only where required for legal, accounting, fraud-prevention, or dispute purposes.</p><p>We do not sell personal information. Contact <a href="mailto:${privacyEmail}">${privacyEmail}</a> or write to ${address}.</p>`
+    },
+    "/privacy-choices": {
+      title: "California Privacy Choices",
+      body: `<p>California residents may request access, correction, deletion, and limitation of eligible personal information without discriminatory treatment. Submit a request in the app or email <a href="mailto:${privacyEmail}">${privacyEmail}</a>.</p><p>We do not sell or share personal information for cross-context behavioral advertising. If this practice changes, this page will provide an opt-out control.</p>`
+    },
+    "/terms": {
+      title: "Membership & Booking Terms",
+      body: `<p>Prices are shown in US dollars. Class passes do not renew automatically unless you separately and affirmatively consent to recurring billing.</p><p>You may cancel renewal or submit a membership cancellation request inside the app. Cancellation and refund eligibility depend on the signed membership agreement and applicable California law. Booking cancellation terms are displayed during booking.</p><p>For support, contact <a href="mailto:${supportEmail}">${supportEmail}</a>.</p>`
+    },
+    "/support": {
+      title: "App Support",
+      body: `<p>For help with your Good Vibe account, class bookings, memberships, payments, refunds, or accessibility, email <a href="mailto:${supportEmail}">${supportEmail}</a>.</p><p>Please include the email address associated with your account and a short description of the issue. Do not send passwords or full payment card details.</p><p>We aim to reply within two business days. You can also manage bookings, request membership cancellation, export your data, or request account deletion directly in the app.</p>`
+    }
+  };
+  const page = pages[pagePath];
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${page.title} | ${operator}</title><style>body{font:16px/1.65 system-ui;max-width:760px;margin:auto;padding:32px 20px;color:#252420;background:#faf8f4}h1{line-height:1.15}a{color:#375b52}.meta{color:#6d6a63}</style></head><body><p><a href="/">${operator}</a></p><h1>${page.title}</h1><p class="meta">Effective ${effectiveDate}</p>${page.body}<hr><p class="meta">Operator: ${operator}<br>Mailing address: ${address}</p></body></html>`;
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=300" });
+  res.end(html);
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[character]);
 }

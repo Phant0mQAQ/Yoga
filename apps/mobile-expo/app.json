@@ -1,8 +1,8 @@
 {
   "expo": {
     "name": "Good Vibe Pilates & Yoga",
-    "slug": "yomi-yoga",
-    "scheme": "yomiyoga",
+    "slug": "good-vibe-pilates-yoga",
+    "scheme": "goodvibe",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
@@ -15,11 +15,11 @@
     "ios": {
       "icon": "./assets/good-vibe-icon.png",
       "supportsTablet": false,
-      "bundleIdentifier": "com.yomiyoga.studio",
+      "bundleIdentifier": "com.goodvibe.pilatesyoga",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "Camera access is used by staff to scan booking check-in QR codes.",
-        "NSPhotoLibraryUsageDescription": "Photo library access is used by admins to upload coach, content, and product images."
+        "NSPhotoLibraryUsageDescription": "Photo library access is used by members to choose a profile photo and by admins to upload coach, content, and product images."
       }
     },
     "android": {
@@ -33,6 +33,12 @@
       "blockedPermissions": [
         "android.permission.RECORD_AUDIO"
       ]
+    },
+    "web": {
+      "output": "single"
+    },
+    "experiments": {
+      "baseUrl": "/app"
     },
     "plugins": [
       "expo-router",
@@ -49,14 +55,15 @@
       [
         "expo-image-picker",
         {
+          "photosPermission": "Allow Good Vibe Pilates & Yoga to access your photos so you can choose a profile photo or upload studio images.",
           "microphonePermission": false
         }
       ],
       [
         "@stripe/stripe-react-native",
         {
-          "merchantIdentifier": "merchant.com.yomiyoga.studio",
-          "enableGooglePay": false
+          "merchantIdentifier": "merchant.com.goodvibe.pilatesyoga",
+          "enableGooglePay": true
         }
       ],
       "expo-font"
@@ -64,7 +71,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "75b391af-50bd-41a9-967b-2736a6d09905"
+        "projectId": "cf7a295f-471a-4efb-9931-bed4b2236f7d"
       }
     },
     "owner": "yogayoga"

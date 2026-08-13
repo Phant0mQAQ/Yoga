@@ -1,9 +1,13 @@
 .env
 .env.*
 !.env.example
+!.env.*.example
 *.log
 
 node_modules/
+.sync-original/
+.wrangler/
+.wrangler-dryrun/
 apps/mobile-expo/.expo/
 apps/mobile-expo/.expo-*/
 apps/mobile-expo/expo.stdout.log
@@ -13,4 +17,6 @@ apps/admin/dist/
 .playwright-cli/
 .tmp-admin-preview/
 output/
+.cloudflare/
+.wrangler-backups/
 supabase/.temp/

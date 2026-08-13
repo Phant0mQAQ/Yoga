@@ -1,5 +1,7 @@
 # Good Vibe Pilates & Yoga Cloud Deployment
 
+> Legacy rollback guide. New production deployments target Alibaba Cloud US West; see `docs/alibaba-cloud-deployment.md`.
+
 The production topology is:
 
 ```text
@@ -49,7 +51,7 @@ For a URL such as `https://abc123.supabase.co`, the project ref is `abc123`.
 service-role key.
 
 After the push, verify in the Supabase table editor that
-`public.yomi_app_state` exists and has Row Level Security enabled.
+`public.good_vibe_app_state` exists and has Row Level Security enabled.
 
 ## 3. Publish the repository
 
@@ -103,7 +105,7 @@ SUPABASE_STORAGE_BUCKET=<pre-created public bucket name, without slashes>
 STRIPE_SECRET_KEY=sk_live_...
 STRIPE_PUBLISHABLE_KEY=pk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-STRIPE_MERCHANT_IDENTIFIER=merchant.com.yomiyoga.studio
+STRIPE_MERCHANT_IDENTIFIER=merchant.com.goodvibe.pilatesyoga
 INITIAL_ADMIN_EMAIL=<private administrator email>
 INITIAL_ADMIN_PASSWORD=<unique password, at least 12 characters>
 ```
@@ -198,8 +200,8 @@ Keep all Supabase and Stripe server keys on Render.
 The configured iOS identifiers are:
 
 ```text
-Bundle ID: com.yomiyoga.studio
-Apple Pay merchant ID: merchant.com.yomiyoga.studio
+Bundle ID: com.goodvibe.pilatesyoga
+Apple Pay merchant ID: merchant.com.goodvibe.pilatesyoga
 ```
 
 If either identifier is already owned by another Apple account, change both
