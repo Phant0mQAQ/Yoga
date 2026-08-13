@@ -2,18 +2,35 @@
   "name": "good-vibe-pilates-yoga",
   "version": "0.1.0",
   "private": true,
+  "workspaces": [
+    "apps/admin",
+    "apps/mobile-expo"
+  ],
   "type": "module",
   "description": "Good Vibe Pilates & Yoga booking and studio management system.",
   "scripts": {
     "start": "node apps/api/server.js",
     "start:supabase": "node --env-file=.env apps/api/server.js",
-    "test": "node tests/brand.test.js && node tests/domain.test.js && node tests/financial-invariants.test.js && node tests/admin-web.test.js && node tests/admin-ui-regressions.test.js && node tests/store-repository.test.js && node tests/storage-provider.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
+    "start:alibaba": "node --env-file=.env.alibaba apps/api/server.js",
+    "test": "node tests/brand.test.js && node tests/domain.test.js && node tests/email-provider.test.js && node tests/firebase-auth-provider.test.js && node tests/financial-invariants.test.js && node tests/admin-web.test.js && node tests/admin-ui-regressions.test.js && node tests/mobile-pwa.test.js && node tests/ios-source.test.js && node tests/cloudflare-config.test.js && node tests/store-repository.test.js && node tests/storage-provider.test.js && node tests/api-routes.test.js && node tests/full-flow.test.js && node tests/supabase-api.test.js && node tests/production-startup.test.js",
     "preflight": "node scripts/release-preflight.mjs",
-    "preflight:cloud": "node scripts/release-preflight.mjs --cloud"
+    "preflight:cloud": "node scripts/release-preflight.mjs --cloud",
+    "build:cloudflare": "node scripts/build-cloudflare.mjs",
+    "deploy:cloudflare": "wrangler deploy",
+    "preflight:alibaba": "node --env-file=.env.alibaba scripts/release-preflight.mjs --alibaba",
+    "migrate:alibaba:state": "node --env-file=.env.alibaba scripts/migrate-supabase-to-rds.mjs",
+    "migrate:alibaba:assets": "node --env-file=.env.alibaba scripts/migrate-supabase-storage-to-oss.mjs",
+    "deploy:admin:oss": "node --env-file=.env.alibaba scripts/deploy-admin-oss.mjs"
   },
   "engines": {
     "node": ">=20"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "dependencies": {
+    "ali-oss": "^6.23.0",
+    "pg": "^8.22.0",
+    "stripe": "^22.3.2"
+  },
+  "devDependencies": {
+    "wrangler": "^4.112.0"
+  }
 }

@@ -47,8 +47,9 @@ Good Vibe Pilates & Yoga is a role-based Pilates and yoga studio booking and ope
 2. A role is locked for the current session. To test another role, use the logout button and sign in again with the corresponding review account.
 3. The Student account includes a test membership card so reviewers can book a class without making a real payment.
 4. Camera access is used only by authorized Staff users to scan booking check-in QR codes. Photo library access is used only by Admin users to upload coach, content, and product images.
-5. Stripe payments are for yoga classes and physical goods/services consumed outside the app. The app does not sell digital content or unlock in-app digital functionality through Stripe.
-6. The app supports English, Simplified Chinese, and Korean. Light and dark appearance controls are available on the login screen and main screens.
+5. Apple Pay is not integrated or offered as an in-app payment method in this version. The PassKit framework is included transitively by the third-party Stripe React Native SDK. The app currently offers card and PayPal checkout for eligible in-person classes and physical goods/services.
+6. Stripe payments are only for goods and services consumed outside the app. The app does not sell digital content or unlock in-app digital functionality through Stripe.
+7. The app supports English, Simplified Chinese, and Korean. Light and dark appearance controls are available on the login screen and main screens.
 
 Suggested Student test path:
 - Sign in with the Student account.
@@ -62,8 +63,8 @@ Suggested Admin test path:
 - Review Dashboard, Members, Schedule, Content, Commerce, and Settings.
 - High-risk actions require confirmation and are written to the audit log.
 
-API status page: https://[CLIENT API HOST]/health
-Support: https://[CLIENT DOMAIN]/support
+API status page: https://good-vibe-pilates-yoga.2316196563.workers.dev/health
+Support: https://good-vibe-pilates-yoga.2316196563.workers.dev/support
 ```
 
 Apple 当前审核规则明确：对 App 外消费的实体商品或服务，应使用 Apple Pay 或银行卡等非 IAP 支付。Good Vibe Pilates & Yoga 的 Stripe 支付说明必须始终与实际业务一致。

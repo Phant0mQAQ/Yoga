@@ -1,7 +1,7 @@
 const SUPPORTED_LOCALES = ["en", "zh-Hans", "ko"];
 const DEFAULT_LOCALE = "en";
-const LOCALE_STORAGE_KEY = "yomi-admin-locale";
-const THEME_STORAGE_KEY = "yomi-admin-theme";
+const LOCALE_STORAGE_KEY = "good-vibe-admin-locale";
+const THEME_STORAGE_KEY = "good-vibe-admin-theme";
 
 const messages = {
   en: {
@@ -59,6 +59,7 @@ const messages = {
     checkIn: "Check in",
     noBookings: "No bookings yet.",
     paymentMethods: "Payment methods",
+    supportedPayments: "Supported payments",
     hongKong: "Hong Kong",
     southKorea: "South Korea",
     china: "China",
@@ -92,7 +93,7 @@ const messages = {
     commerceTitle: "Products, orders, and payments",
     commerceSubtitle: "Manage inventory, review orders, and issue Stripe refunds.",
     settingsOps: "SYSTEM",
-    settingsTitle: "Plans, payments, uploads, and audit",
+    settingsTitle: "Plans, payments, and audit",
     settingsSubtitle: "Configure membership products and review administrative activity.",
     searchMembers: "Search members",
     noResults: "No matching records.",
@@ -115,9 +116,6 @@ const messages = {
     products: "Products",
     orders: "Orders",
     membershipPlans: "Membership plans",
-    uploads: "Media upload",
-    createUploadUrl: "Create upload URL",
-    uploadReady: "Upload URL created.",
     orderTotal: "Order total",
     stock: "Stock",
     price: "Price",
@@ -133,6 +131,11 @@ const messages = {
     age: "Age",
     experience: "Years of experience",
     avatarUrl: "Avatar URL",
+    courseImage: "Course image",
+    chooseCourseImage: "Choose course image",
+    replaceCourseImage: "Replace course image",
+    courseImageUploading: "Uploading course image...",
+    courseImageHelp: "JPEG, PNG, WebP, HEIC, or HEIF up to 10 MB.",
     tags: "Tags",
     courseId: "Course ID",
     coachId: "Coach ID",
@@ -151,16 +154,10 @@ const messages = {
     days: "Days",
     addCredits: "Credits to add",
     recipient: "Recipient",
-    fileName: "File name",
-    scope: "Upload scope",
     actions: "Actions",
     details: "Details",
-    chooseUploadFile: "Choose an image to upload",
-    uploading: "Uploading...",
     uploadFailed: "Upload failed.",
     uploadComplete: "Upload complete.",
-    uploadedFile: "Uploaded file",
-    publicUrl: "Public URL",
     refundAmount: "Refund amount",
     refundable: "Refundable",
     refunding: "Refunding...",
@@ -242,6 +239,7 @@ const messages = {
     checkIn: "核销",
     noBookings: "暂无预约。",
     paymentMethods: "支付方式",
+    supportedPayments: "支持的支付方式",
     hongKong: "中国香港",
     southKorea: "韩国",
     china: "中国大陆",
@@ -275,7 +273,7 @@ const messages = {
     commerceTitle: "商品、订单与支付",
     commerceSubtitle: "管理库存、查看订单并处理 Stripe 退款。",
     settingsOps: "系统设置",
-    settingsTitle: "会员计划、支付、上传与审计",
+    settingsTitle: "会员计划、支付与审计",
     settingsSubtitle: "配置会员产品并查看后台操作记录。",
     searchMembers: "搜索会员",
     noResults: "没有匹配的记录。",
@@ -298,9 +296,6 @@ const messages = {
     products: "商品",
     orders: "订单",
     membershipPlans: "会员计划",
-    uploads: "媒体上传",
-    createUploadUrl: "创建上传地址",
-    uploadReady: "上传地址已创建。",
     orderTotal: "订单金额",
     stock: "库存",
     price: "价格",
@@ -316,6 +311,11 @@ const messages = {
     age: "年龄",
     experience: "教龄",
     avatarUrl: "头像地址",
+    courseImage: "课程图片",
+    chooseCourseImage: "选择课程图片",
+    replaceCourseImage: "更换课程图片",
+    courseImageUploading: "正在上传课程图片...",
+    courseImageHelp: "支持 JPEG、PNG、WebP、HEIC 或 HEIF，最大 10 MB。",
     tags: "标签",
     courseId: "课程 ID",
     coachId: "教练 ID",
@@ -334,16 +334,10 @@ const messages = {
     days: "天数",
     addCredits: "增加课次",
     recipient: "接收会员",
-    fileName: "文件名",
-    scope: "上传目录",
     actions: "操作",
     details: "详情",
-    chooseUploadFile: "选择要上传的图片",
-    uploading: "正在上传...",
     uploadFailed: "上传失败。",
     uploadComplete: "上传完成。",
-    uploadedFile: "已上传文件",
-    publicUrl: "公开地址",
     refundAmount: "退款金额",
     refundable: "可退金额",
     refunding: "正在退款...",
@@ -425,6 +419,7 @@ const messages = {
     checkIn: "체크인",
     noBookings: "예약이 없습니다.",
     paymentMethods: "결제 수단",
+    supportedPayments: "지원 결제 수단",
     hongKong: "홍콩",
     southKorea: "대한민국",
     china: "중국",
@@ -458,7 +453,7 @@ const messages = {
     commerceTitle: "상품, 주문 및 결제",
     commerceSubtitle: "재고와 주문을 관리하고 Stripe 환불을 처리합니다.",
     settingsOps: "시스템",
-    settingsTitle: "회원 플랜, 결제, 업로드 및 감사",
+    settingsTitle: "회원 플랜, 결제 및 감사",
     settingsSubtitle: "회원 상품을 설정하고 관리자 작업을 검토합니다.",
     searchMembers: "회원 검색",
     noResults: "일치하는 기록이 없습니다.",
@@ -481,9 +476,6 @@ const messages = {
     products: "상품",
     orders: "주문",
     membershipPlans: "회원 플랜",
-    uploads: "미디어 업로드",
-    createUploadUrl: "업로드 URL 생성",
-    uploadReady: "업로드 URL이 생성되었습니다.",
     orderTotal: "주문 금액",
     stock: "재고",
     price: "가격",
@@ -499,6 +491,11 @@ const messages = {
     age: "나이",
     experience: "경력",
     avatarUrl: "프로필 이미지 URL",
+    courseImage: "수업 이미지",
+    chooseCourseImage: "수업 이미지 선택",
+    replaceCourseImage: "수업 이미지 변경",
+    courseImageUploading: "수업 이미지 업로드 중...",
+    courseImageHelp: "JPEG, PNG, WebP, HEIC 또는 HEIF, 최대 10MB.",
     tags: "태그",
     courseId: "수업 ID",
     coachId: "강사 ID",
@@ -517,16 +514,10 @@ const messages = {
     days: "일수",
     addCredits: "추가 횟수",
     recipient: "받는 회원",
-    fileName: "파일 이름",
-    scope: "업로드 경로",
     actions: "작업",
     details: "상세",
-    chooseUploadFile: "업로드할 이미지 선택",
-    uploading: "업로드 중...",
     uploadFailed: "업로드에 실패했습니다.",
     uploadComplete: "업로드가 완료되었습니다.",
-    uploadedFile: "업로드된 파일",
-    publicUrl: "공개 URL",
     refundAmount: "환불 금액",
     refundable: "환불 가능 금액",
     refunding: "환불 처리 중...",
@@ -574,7 +565,7 @@ const KNOWN_ROLES = [
 const resourceSchemas = {
   coaches: [
     field("name", "name", "text", true),
-    field("userId", "userId"),
+    field("userId", "userId", "text", true),
     field("age", "age", "number", false, [], { min: 0, step: 1 }),
     field("yearsOfExperience", "experience", "number", false, [], { min: 0, step: 1 }),
     field("avatarUrl", "avatarUrl"),
@@ -584,13 +575,15 @@ const resourceSchemas = {
   courses: [
     localizedField("title", "title", true),
     localizedField("description", "description"),
+    field("imageUrl", "courseImage", "image"),
     field("categoryId", "categoryId"),
     field("durationMinutes", "duration", "number", true, [], { min: 1, step: 1 }),
     field("priceAmount", "priceAmount", "number", true, [], { min: 1, step: 1 }),
-    field("currency", "currency", "select", true, ["KRW", "HKD", "USD", "CNY"]),
+    field("currency", "currency", "select", true, ["USD", "CAD", "EUR", "GBP"]),
     field("capacity", "capacity", "number", true, [], { min: 1, step: 1 }),
     field("memberCardDeductCount", "deductCount", "number", true, [], { min: 1, step: 1 }),
-    field("tags", "tags", "array")
+    field("tags", "tags", "array"),
+    field("active", "enabled", "checkbox")
   ],
   "course-sessions": [
     field("courseId", "courseId", "text", true),
@@ -598,7 +591,7 @@ const resourceSchemas = {
     field("startsAt", "startsAt", "datetime-local", true),
     field("endsAt", "endsAt", "datetime-local", true),
     field("capacity", "capacity", "number", true, [], { min: 1, step: 1 }),
-    field("status", "status", "select", true, ["open", "cancelled"])
+    field("status", "status", "select", true, ["draft", "open", "closed", "cancelled"])
   ],
   "content-blocks": [
     field("type", "type", "select", true, ["banner", "feature", "knowledge", "recommendation"]),
@@ -613,7 +606,7 @@ const resourceSchemas = {
     localizedField("description", "description"),
     field("category", "category"),
     field("priceAmount", "priceAmount", "number", true, [], { min: 1, step: 1 }),
-    field("currency", "currency", "select", true, ["KRW", "HKD", "USD", "CNY"]),
+    field("currency", "currency", "select", true, ["USD", "CAD", "EUR", "GBP"]),
     field("stock", "stock", "number", false, [], { min: 0, step: 1 }),
     field("active", "enabled", "checkbox")
   ],
@@ -621,7 +614,7 @@ const resourceSchemas = {
     localizedField("title", "title", true),
     field("totalCredits", "totalCredits", "number", true, [], { min: 1, step: 1 }),
     field("priceAmount", "priceAmount", "number", true, [], { min: 1, step: 1 }),
-    field("currency", "currency", "select", true, ["KRW", "HKD", "USD", "CNY"]),
+    field("currency", "currency", "select", true, ["USD", "CAD", "EUR", "GBP"]),
     field("validityDays", "validityDays", "number", true, [], { min: 1, step: 1 }),
     field("benefits", "benefits", "array")
   ]
@@ -641,9 +634,8 @@ let loginBusy = false;
 let loginMessageState = { key: "loginHint", text: "" };
 let viewRequestVersion = 0;
 const refundsInFlight = new Set();
-const uploadState = { busy: false, fileName: "", publicUrl: "", error: "" };
 const API_BASE_URL = normalizeBaseUrl(
-  window.GOOD_VIBE_CONFIG?.apiBaseUrl ?? window.YOMI_CONFIG?.apiBaseUrl ?? ""
+  window.GOOD_VIBE_CONFIG?.apiBaseUrl ?? ""
 );
 const el = (id) => document.getElementById(id);
 
@@ -671,6 +663,8 @@ el("modalBackdrop").addEventListener("click", (event) => {
   if (event.target === el("modalBackdrop")) closeModal();
 });
 el("modalForm").addEventListener("submit", submitModal);
+el("modalForm").addEventListener("click", handleModalClick);
+el("modalForm").addEventListener("change", handleModalChange);
 document.addEventListener("keydown", handleModalKeydown);
 
 document.querySelectorAll("[data-view]").forEach((button) => {
@@ -684,7 +678,6 @@ document.querySelectorAll("[data-view]").forEach((button) => {
 
 el("viewRoot").addEventListener("click", handleViewClick);
 el("viewRoot").addEventListener("input", handleViewInput);
-el("viewRoot").addEventListener("change", handleViewChange);
 el("viewRoot").addEventListener("keydown", handleResourceTabKeydown);
 
 async function login() {
@@ -784,17 +777,16 @@ function isCurrentViewRequest(requestId, view) {
 }
 
 async function renderOverview(requestId) {
-  const [dashboard, bookings, cards, payments, availability, auditLogs, methods] = await Promise.all([
+  const [dashboard, bookings, cards, payments, availability, auditLogs] = await Promise.all([
     api("/admin/dashboard"),
     api(`/bookings?locale=${encodeURIComponent(locale)}`),
     api("/admin/member-cards"),
     api("/admin/payments"),
     api(`/availability?locale=${encodeURIComponent(locale)}`),
-    api("/admin/audit-logs"),
-    api(`/payments/methods?country=HK&currency=HKD&locale=${encodeURIComponent(locale)}`)
+    api("/admin/audit-logs")
   ]);
   if (!isCurrentViewRequest(requestId, "overview")) return;
-  currentData = { dashboard, bookings, cards, payments, availability, auditLogs, methods };
+  currentData = { dashboard, bookings, cards, payments, availability, auditLogs };
   el("viewRoot").innerHTML = `
     <section class="summary-grid">
       ${metric("01", availability.length, t("courses"))}
@@ -802,12 +794,12 @@ async function renderOverview(requestId) {
       ${metric("03", cards.length, t("memberCards"))}
       ${metric("04", payments.length, t("payments"))}
     </section>
-    <section class="content-grid">
-      <article class="panel">
+    <section class="overview-grid">
+      <article class="panel overview-primary">
         ${sectionHead("today", "classAvailability")}
-        <div class="table-wrap"><table>
-          <thead><tr><th>${t("course")}</th><th>${t("coach")}</th><th>${t("start")}</th><th>${t("open")}</th></tr></thead>
-          <tbody>${availability.map((item) => `<tr><td>${escapeHtml(localized(item.course?.title) || item.courseId)}</td><td>${escapeHtml(item.coach?.name || item.coachId)}</td><td>${formatDate(item.startsAt)}</td><td>${item.remainingCapacity}</td></tr>`).join("")}</tbody>
+        <div class="table-wrap"><table class="availability-table">
+          <thead><tr><th>${t("course")}</th><th>${t("bookings")}</th><th>${t("open")}</th><th>${t("coach")}</th><th>${t("start")}</th></tr></thead>
+          <tbody>${availability.map((item) => `<tr><td>${escapeHtml(localized(item.course?.title) || item.courseId)}</td><td><strong class="booking-count">${item.participantCount ?? item.bookedCount ?? 0}</strong></td><td>${item.remainingCapacity}</td><td>${escapeHtml(item.coach?.name || item.coachId)}</td><td>${formatDate(item.startsAt)}</td></tr>`).join("")}</tbody>
         </table></div>
       </article>
       <article class="panel">
@@ -818,11 +810,7 @@ async function renderOverview(requestId) {
         </table></div>
       </article>
     </section>
-    <section class="panel">
-      ${sectionHeadRaw("STRIPE", t("paymentMethods"))}
-      <div class="method-list">${methods.map(paymentMethodCard).join("")}</div>
-    </section>
-    <section class="panel">
+    <section class="panel audit-panel">
       ${sectionHead("security", "auditHistory", `<span class="readonly">${escapeHtml(t("readOnly"))}</span>`)}
       ${auditTable(auditLogs.slice(-12).reverse())}
     </section>`;
@@ -904,7 +892,7 @@ async function renderContent(requestId) {
 async function renderSettings(requestId) {
   const [plans, methods, auditLogs] = await Promise.all([
     api("/admin/membership-plans"),
-    api(`/payments/methods?country=KR&currency=KRW&locale=${encodeURIComponent(locale)}`),
+    api(`/payments/methods?scope=all&locale=${encodeURIComponent(locale)}`),
     api("/admin/audit-logs")
   ]);
   if (!isCurrentViewRequest(requestId, "settings")) return;
@@ -915,20 +903,20 @@ async function renderSettings(requestId) {
         ${sectionHeadRaw(t("membershipPlans"), `${plans.length}`, `<button class="secondary compact" data-action="create-resource" data-resource="membership-plans">+ ${t("create")}</button>`)}
         <div class="resource-list compact-list">${renderResourceRows("membership-plans", plans)}</div>
       </article>
-      <article class="panel">
-        ${sectionHeadRaw("STRIPE", t("paymentMethods"))}
-        <div class="method-list">${methods.map(paymentMethodCard).join("")}</div>
-      </article>
-      <article class="panel">
-        ${sectionHeadRaw(t("uploads"), t("createUploadUrl"))}
-        <div class="upload-zone" aria-busy="${uploadState.busy}">
-          <span aria-hidden="true">↑</span>
-          <p>${escapeHtml(t("chooseUploadFile"))}</p>
-          <input id="uploadFileInput" type="file" accept="image/*" hidden>
-          <button data-action="choose-upload" ${uploadState.busy ? "disabled" : ""}>${escapeHtml(t(uploadState.busy ? "uploading" : "chooseUploadFile"))}</button>
-          <div id="uploadResult" class="upload-result" role="status" aria-live="polite">${uploadResultMarkup()}</div>
+      <details class="panel settings-payment-disclosure">
+        <summary class="settings-payment-summary">
+          <div>
+            <p class="eyebrow">${escapeHtml(t("supportedPayments"))}</p>
+            <h2>${escapeHtml(t("paymentMethods"))}</h2>
+          </div>
+          <svg class="settings-payment-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="m6 9 6 6 6-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </summary>
+        <div class="settings-payment-body">
+          <div class="method-list payment-catalog">${paymentMethodsForDisplay(methods).map(paymentMethodCard).join("")}</div>
         </div>
-      </article>
+      </details>
       <article class="panel audit-wide">
         ${sectionHead("security", "auditHistory", `<span class="readonly">${t("readOnly")}</span>`)}
         ${auditTable(auditLogs.slice(-30).reverse())}
@@ -1031,7 +1019,6 @@ async function handleViewClick(event) {
   if (action === "edit-resource") return openResourceForm(button.dataset.resource, button.dataset.id);
   if (action === "delete-resource") return deleteResource(button.dataset.resource, button.dataset.id);
   if (action === "refund-payment") return refundPayment(button.dataset.id);
-  if (action === "choose-upload") return el("uploadFileInput")?.click();
 }
 
 function handleViewInput(event) {
@@ -1039,10 +1026,43 @@ function handleViewInput(event) {
   el("memberList").innerHTML = renderMemberCards(currentData.members, currentData.cards, event.target.value);
 }
 
-function handleViewChange(event) {
-  if (event.target.id !== "uploadFileInput") return;
+function handleModalClick(event) {
+  const button = event.target.closest('[data-action="choose-course-image"]');
+  if (!button || modalSubmitting) return;
+  el("modalFields").querySelector('[data-course-image-file]')?.click();
+}
+
+function handleModalChange(event) {
+  if (!event.target.matches("[data-course-image-file]")) return;
   const [file] = event.target.files || [];
-  if (file) void uploadSelectedFile(file);
+  if (file) void uploadCourseImageFile(file);
+}
+
+async function uploadCourseImageFile(file) {
+  const field = el("modalFields").querySelector(".course-image-field");
+  const fileInput = field?.querySelector("[data-course-image-file]");
+  const urlInput = field?.querySelector('[data-field-key="imageUrl"]');
+  const button = field?.querySelector('[data-action="choose-course-image"]');
+  const status = field?.querySelector("[data-course-image-status]");
+  if (!field || !urlInput || !button || button.disabled) return;
+
+  button.disabled = true;
+  button.textContent = t("courseImageUploading");
+  status.textContent = "";
+  try {
+    const result = await uploadImageFile(file, "courses");
+    urlInput.value = result.publicUrl;
+    const preview = field.querySelector("[data-course-image-preview]");
+    preview.innerHTML = `<img src="${escapeAttr(result.publicUrl)}" alt="${escapeAttr(t("courseImage"))}">`;
+    button.textContent = t("replaceCourseImage");
+    showToast(t("uploadComplete"));
+  } catch (error) {
+    status.textContent = error.code?.startsWith("upload_") ? error.message : `${t("uploadFailed")} ${localizeApiError(error)}`;
+    button.textContent = urlInput.value ? t("replaceCourseImage") : t("chooseCourseImage");
+  } finally {
+    button.disabled = false;
+    if (fileInput) fileInput.value = "";
+  }
 }
 
 function handleResourceTabKeydown(event) {
@@ -1161,57 +1181,27 @@ function refundPayment(id) {
   });
 }
 
-function uploadResultMarkup() {
-  if (uploadState.error) return `<p class="form-error">${escapeHtml(uploadState.error)}</p>`;
-  if (!uploadState.publicUrl) return "";
-  return `<strong>${escapeHtml(t("uploadedFile"))}: ${escapeHtml(uploadState.fileName)}</strong>
-    <a href="${escapeAttr(uploadState.publicUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t("publicUrl"))}: ${escapeHtml(uploadState.publicUrl)}</a>`;
-}
-
-function renderUploadState() {
-  const zone = el("uploadFileInput")?.closest(".upload-zone");
-  const button = zone?.querySelector('[data-action="choose-upload"]');
-  if (zone) zone.setAttribute("aria-busy", String(uploadState.busy));
-  if (button) {
-    button.disabled = uploadState.busy;
-    button.textContent = t(uploadState.busy ? "uploading" : "chooseUploadFile");
-  }
-  if (el("uploadResult")) el("uploadResult").innerHTML = uploadResultMarkup();
-}
-
-async function uploadSelectedFile(file) {
-  if (uploadState.busy) return;
-  uploadState.busy = true;
-  uploadState.fileName = file.name;
-  uploadState.publicUrl = "";
-  uploadState.error = "";
-  renderUploadState();
+async function uploadImageFile(file, scope) {
+  const contentType = file.type || "application/octet-stream";
+  const result = await adminWrite("/admin/uploads/presign", "POST", {
+    fileName: file.name,
+    scope,
+    contentType,
+    fileSize: file.size
+  });
+  const headers = { ...(result.headers || {}) };
+  if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) headers["Content-Type"] = contentType;
+  const uploadUrl = new URL(result.uploadUrl, window.location.origin);
+  if (uploadUrl.origin === window.location.origin && token) headers.Authorization = `Bearer ${token}`;
+  let response;
   try {
-    const contentType = file.type || "application/octet-stream";
-    const result = await adminWrite("/admin/uploads/presign", "POST", {
-      fileName: file.name,
-      scope: "content",
-      contentType
-    });
-    const headers = { ...(result.headers || {}) };
-    if (!Object.keys(headers).some((key) => key.toLowerCase() === "content-type")) headers["Content-Type"] = contentType;
-    let response;
-    try {
-      response = await fetch(result.uploadUrl, { method: "PUT", headers, body: file });
-    } catch {
-      throw apiError(t("requestFailed"), 0, "upload_network_failed");
-    }
-    if (!response.ok) throw apiError(`${t("uploadFailed")} (${response.status})`, response.status, "upload_put_failed");
-    if (!result.publicUrl) throw apiError(t("uploadFailed"), 0, "upload_public_url_missing");
-    uploadState.publicUrl = result.publicUrl;
-    showToast(t("uploadComplete"));
-  } catch (error) {
-    uploadState.error = error.code?.startsWith("upload_") ? error.message : `${t("uploadFailed")} ${localizeApiError(error)}`;
-  } finally {
-    uploadState.busy = false;
-    if (el("uploadFileInput")) el("uploadFileInput").value = "";
-    renderUploadState();
+    response = await fetch(uploadUrl, { method: "PUT", headers, body: file });
+  } catch {
+    throw apiError(t("requestFailed"), 0, "upload_network_failed");
   }
+  if (!response.ok) throw apiError(`${t("uploadFailed")} (${response.status})`, response.status, "upload_put_failed");
+  if (!result.publicUrl) throw apiError(t("uploadFailed"), 0, "upload_public_url_missing");
+  return result;
 }
 
 function openForm(config) {
@@ -1360,6 +1350,20 @@ function renderField(definition, value) {
   if (definition.type === "checkbox") {
     return `<label class="checkbox-field"><input type="checkbox" ${common} ${value !== false ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`;
   }
+  if (definition.type === "image") {
+    const imageUrl = safeImageUrl(value);
+    return `<div class="course-image-field">
+      <span class="course-image-label">${escapeHtml(label)}</span>
+      <input type="hidden" value="${escapeAttr(imageUrl)}" ${common}>
+      <input type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" data-course-image-file hidden>
+      <div class="course-image-preview" data-course-image-preview>${imageUrl ? `<img src="${escapeAttr(imageUrl)}" alt="${escapeAttr(label)}">` : `<span aria-hidden="true">+</span>`}</div>
+      <div class="course-image-actions">
+        <button type="button" class="secondary" data-action="choose-course-image">${escapeHtml(t(imageUrl ? "replaceCourseImage" : "chooseCourseImage"))}</button>
+        <small>${escapeHtml(t("courseImageHelp"))}</small>
+      </div>
+      <p class="form-error" data-course-image-status role="status" aria-live="polite"></p>
+    </div>`;
+  }
   if (definition.type === "select" || definition.type === "multiselect") {
     const selectedValues = new Set(Array.isArray(value) ? value.map(String) : [String(value ?? "")]);
     const options = (definition.options || []).map((option) => {
@@ -1375,6 +1379,17 @@ function renderField(definition, value) {
   const inputType = ["number", "email", "datetime-local"].includes(definition.type) ? definition.type : "text";
   const displayValue = definition.type === "datetime-local" ? toDateTimeLocal(value) : definition.type === "array" && Array.isArray(value) ? value.map(localized).join(", ") : value ?? "";
   return `<label><span>${escapeHtml(label)}</span><input type="${inputType}" value="${escapeAttr(displayValue)}" ${common}></label>`;
+}
+
+function safeImageUrl(value) {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return "";
+  try {
+    const url = new URL(candidate, window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? candidate : "";
+  } catch {
+    return "";
+  }
 }
 
 async function runAction(action, successMessage) {
@@ -1404,10 +1419,12 @@ async function api(path, options = {}) {
   }
   const text = await response.text();
   let data = {};
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { message: text };
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw apiError(t("requestFailed"), response.status, "invalid_response");
+    }
   }
   if (!response.ok) throw apiError(data.message || data.error || t("requestFailed"), response.status, data.error);
   return data;
@@ -1440,7 +1457,6 @@ function applyTranslations() {
   setLoginBusy(loginBusy);
   renderLoginMessage();
   refreshOpenModalTranslations();
-  renderUploadState();
 }
 
 function applyHeader() {
@@ -1528,11 +1544,11 @@ function localizedField(key, label, required = false) {
 }
 
 function defaultResource(resource) {
-  if (resource === "courses") return { currency: "KRW", durationMinutes: 60, priceAmount: 1, capacity: 8, memberCardDeductCount: 1 };
+  if (resource === "courses") return { currency: "USD", durationMinutes: 60, priceAmount: 100, capacity: 8, memberCardDeductCount: 1, active: true };
   if (resource === "course-sessions") return { capacity: 8, status: "open" };
   if (resource === "content-blocks") return { type: "banner", sortOrder: 1, active: true };
-  if (resource === "products") return { currency: "KRW", priceAmount: 1, stock: 0, active: true };
-  if (resource === "membership-plans") return { currency: "KRW", totalCredits: 10, priceAmount: 1, validityDays: 180 };
+  if (resource === "products") return { currency: "USD", priceAmount: 100, stock: 0, active: true };
+  if (resource === "membership-plans") return { currency: "USD", totalCredits: 10, priceAmount: 100, validityDays: 180, autoRenew: false, contractVersion: "ca-2026-01" };
   return {};
 }
 
@@ -1597,7 +1613,69 @@ function bookingRow(item) {
 }
 
 function paymentMethodCard(method) {
-  return `<div class="method"><strong>${escapeHtml(method.display?.[locale] || method.display?.en || method.code)}</strong><span>${escapeHtml(interpolate(t("methodDetails"), method))}</span></div>`;
+  const isCard = method.code === "card";
+  return `<article class="method payment-method${isCard ? " payment-method-card" : ""}">
+    <div class="payment-method-heading">
+      ${paymentMethodIcon(method.code)}
+      <strong>${escapeHtml(method.display?.[locale] || method.display?.en || method.code)}</strong>
+    </div>
+    ${isCard ? cardNetworkLogos() : ""}
+  </article>`;
+}
+
+function paymentMethodsForDisplay(methods) {
+  const walletCapabilities = [
+    {
+      code: "apple_pay",
+      family: "wallet",
+      flow: "native_or_checkout",
+      recurring: true,
+      display: { en: "Apple Pay", "zh-Hans": "Apple Pay", ko: "Apple Pay" }
+    },
+    {
+      code: "google_pay",
+      family: "wallet",
+      flow: "native_or_checkout",
+      recurring: true,
+      display: { en: "Google Pay", "zh-Hans": "Google Pay", ko: "Google Pay" }
+    }
+  ].filter((capability) => !methods.some((method) => method.code === capability.code));
+  const result = [...methods];
+  const cardIndex = methods.findIndex((method) => method.code === "card");
+  result.splice(cardIndex < 0 ? 0 : cardIndex + 1, 0, ...walletCapabilities);
+  return result;
+}
+
+function paymentMethodIcon(code) {
+  const assetByCode = {
+    card: "card.svg",
+    apple_pay: "apple-pay.svg",
+    google_pay: "google-pay.svg",
+    paypal: "paypal.svg",
+    alipay: "alipay.svg",
+    wechat_pay: "wechat-pay.svg",
+    kakao_pay: "kakao-pay.svg",
+    naver_pay: "naver-pay.svg",
+    samsung_pay: "samsung-pay.svg",
+    payco: "payco.png"
+  };
+  const asset = assetByCode[code] || assetByCode.card;
+  return `<span class="admin-payment-logo" aria-hidden="true"><img src="/admin/assets/payment/${asset}" alt=""></span>`;
+}
+
+function cardNetworkLogos() {
+  const networks = [
+    ["Visa", "visa.svg"],
+    ["Mastercard", "mastercard.svg"],
+    ["American Express", "american-express.svg"],
+    ["Discover", "discover.svg"],
+    ["JCB", "jcb.svg"],
+    ["Diners Club", "diners-club.svg"],
+    ["UnionPay", "unionpay.svg"]
+  ];
+  return `<div class="admin-card-networks" aria-label="Visa, Mastercard, American Express, Discover, JCB, Diners Club, and UnionPay">
+    ${networks.map(([name, asset]) => `<span class="admin-card-network" title="${name}"><img src="/admin/assets/payment/${asset}" alt="${name}"></span>`).join("")}
+  </div>`;
 }
 
 function auditTable(rows) {

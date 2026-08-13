@@ -2,20 +2,20 @@
 
 This repository contains the Good Vibe Pilates & Yoga booking and studio management system.
 
-It intentionally uses no npm dependencies so it can run in this workspace without package installation. The backend is implemented with built-in Node modules and can persist its complete business state in Supabase Postgres through the Supabase REST API.
+The backend uses the official PostgreSQL and Alibaba Cloud OSS Node.js clients in production. It can persist its complete business state directly in ApsaraDB RDS for PostgreSQL, while the existing Supabase REST adapter remains available as a temporary migration fallback.
 
 ## What Is Implemented
 
 - REST API under `/api/v1`
-- Email and password login with scrypt password hashes
-- Supabase Postgres persistence with optimistic version checks
+- Firebase Authentication email/password login, hosted verification links, and public student registration
+- Cloudflare D1, Alibaba Cloud RDS PostgreSQL, or Supabase persistence with optimistic version checks
 - In-memory fallback for local development and automated tests
 - Role-locked sessions for `student`, `coach`, `staff`, and `admin`
 - Student booking flow with capacity checks and membership-card deduction
 - Booking cancel, reschedule, and check-in rules
 - Member card freeze, extend, transfer, and upgrade operations
 - Product/order APIs
-- Stripe PaymentIntent and Checkout Session scaffolding
+- Stripe Checkout Sessions, PaymentSheet payloads, signed webhooks, and refunds
 - Stripe webhook signature verification and event handling
 - Generic admin CRUD endpoints
 - Staff mobile-operation endpoints
@@ -49,7 +49,7 @@ Then open:
 Run the migration in the Supabase SQL editor:
 
 ```text
-supabase/migrations/202606090001_yomi_app_state.sql
+supabase/migrations/202606090001_good_vibe_app_state.sql
 ```
 
 Create `.env` from `.env.example`, configure `SUPABASE_URL` and
@@ -63,7 +63,24 @@ The health endpoint reports `"database": "supabase"` when persistence is
 active. See `docs/supabase.md` for details. Never expose the service-role key to
 Expo or any client application.
 
-For durable admin media uploads, pre-create a **public** Supabase Storage
+## Alibaba Cloud US West
+
+The production migration target is Alibaba Cloud **US (Silicon Valley) / US West 1** (`us-west-1`):
+
+- ECS container behind an HTTPS Application Load Balancer for the API
+- ApsaraDB RDS for PostgreSQL for durable state
+- OSS plus CDN custom domains for media and the static admin site
+- ACR for container images
+
+Copy `.env.alibaba.example` to the ignored `.env.alibaba`, fill the real values, then run:
+
+```powershell
+npm run preflight:alibaba
+```
+
+See [docs/alibaba-cloud-deployment.md](docs/alibaba-cloud-deployment.md) for provisioning, migration, cutover, and rollback instructions.
+
+For durable profile-photo and admin media uploads, configure OSS or pre-create a **public** Supabase Storage
 bucket and set `SUPABASE_STORAGE_BUCKET` to its bucket name (no slash). The API
 creates two-hour signed upload URLs; clients upload the raw file with HTTP
 `PUT`. Without this variable, the in-process upload fallback is available only
@@ -118,7 +135,7 @@ Seed users:
 - `staff@example.com` with role `staff`
 - `admin@example.com` with role `admin`
 
-Use password `Yomi@2026` for all demo users.
+Use password `GoodVibe@2026` for all demo users.
 
 ## Stripe Configuration
 
@@ -126,13 +143,19 @@ The Stripe module works in mock mode by default. To call Stripe directly, set:
 
 ```text
 STRIPE_SECRET_KEY=sk_live_or_test_...
+STRIPE_PUBLISHABLE_KEY=pk_live_or_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_MERCHANT_IDENTIFIER=merchant.com.goodvibe.pilatesyoga
 APP_BASE_URL=https://your-domain.example
 ```
 
+The Expo production build also needs the public client values
+`EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY` and
+`EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER`; see `apps/mobile-expo/README.md`.
+
 All three Stripe payment-creation endpoints require an `Idempotency-Key`.
 Order Checkout retries reuse the unexpired session, and Checkout returns via
-the HTTPS `/payments/return` bridge before opening the `yomiyoga` app scheme.
+the HTTPS `/payments/return` bridge before opening the `goodvibe` app scheme.
 Payment fulfillment remains webhook-driven, following Stripe's
 [mobile Checkout guidance](https://docs.stripe.com/mobile/digital-goods/checkout).
 
@@ -140,11 +163,10 @@ The implementation supports:
 
 - `card`
 - Apple Pay through `card` wallet capability
-- `link`
+- Google Pay through `card` wallet capability
 - `paypal`
 - `alipay`
 - `wechat_pay`
-- `kr_card`
 - `kakao_pay`
 - `naver_pay`
 - `samsung_pay`
@@ -159,21 +181,27 @@ The current implementation is runnable and testable. Before higher-scale product
 - Split the compatibility JSONB state into normalized PostgreSQL tables
 - Add PostgreSQL transactions and row-level locks for booking and card deduction
 - Token signing secret to managed secrets
-- Account registration, password reset, and production email delivery
+- Password reset and account recovery
 - Redis lock/idempotency persistence for booking and payment flows
-- Stripe calls to server-side SDK or hardened HTTP client
 - Static admin UI to Next.js
 - iOS source skeleton to a full Xcode project with Stripe iOS SDK
 
 ## Cloud Release
 
-The checked-in deployment configuration uses:
+A functional Cloudflare Workers staging deployment is available at:
 
-- Supabase for Postgres persistence
-- Render for the Node API
-- Vercel for the static admin workspace
+```text
+https://good-vibe-pilates-yoga.2316196563.workers.dev
+```
+
+It uses Workers static assets, the Node.js HTTP compatibility layer, and a D1 state database. Run `npm run deploy:cloudflare` for repeatable deployments. See `docs/cloudflare-deployment.md` for configuration and production-promotion notes.
+
+The primary production deployment configuration uses Alibaba Cloud US West. The prior Render, Supabase, and Vercel configuration is retained only as a migration rollback path.
+
+- ApsaraDB RDS for PostgreSQL
+- ECS, ALB, and ACR for the Node API
+- OSS and CDN for uploads and the static admin workspace
 - EAS Build and EAS Submit for iOS/TestFlight
 
 Run `npm run preflight` before every release. See
-`docs/cloud-deployment.md` for the complete deployment sequence and required
-credentials.
+`docs/alibaba-cloud-deployment.md` for the Alibaba Cloud release sequence. The legacy Render/Supabase/Vercel instructions remain in `docs/cloud-deployment.md` for rollback only.

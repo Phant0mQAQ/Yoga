@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+!.env.alibaba.example
+node_modules
+apps/mobile-expo/node_modules
+apps/mobile-expo/.expo*
+apps/mobile-expo/dist*
+apps/admin/dist
+output
+*.log

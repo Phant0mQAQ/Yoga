@@ -45,7 +45,7 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
   const created = createOrder(store, studentAuth, {
     items: [{ productId: "prod_mat", quantity: 1 }]
   }, "valid-order");
-  assert.equal(created.order.totalAmount, 42000);
+  assert.equal(created.order.totalAmount, 4200);
   assert.equal(store.products[0].stock, initialStock - 1);
 
   assertProblem(() => validatePaymentRequest(store, studentAuth, {
@@ -111,19 +111,19 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
   assert.equal(payment.status, "succeeded");
   assert.equal(store.stripeEvents.length, 3);
   assertProblem(() => prepareRefund(store, payment.id, -5), "invalid_refund_amount");
-  assertProblem(() => prepareRefund(store, payment.id, 42001), "refund_amount_exceeds_remaining");
+  assertProblem(() => prepareRefund(store, payment.id, 4201), "refund_amount_exceeds_remaining");
 
   const partial = recordRefund(store, payment.id, {
-    amount: 10000,
+    amount: 1000,
     providerRefundId: "re_partial",
     status: "succeeded"
   });
   assert.equal(partial.payment.status, "succeeded");
   assert.equal(partial.payment.refundStatus, "partially_refunded");
-  assert.equal(prepareRefund(store, payment.id).amount, 32000);
+  assert.equal(prepareRefund(store, payment.id).amount, 3200);
 
   const completed = recordRefund(store, payment.id, {
-    amount: 32000,
+    amount: 3200,
     providerRefundId: "re_remaining",
     status: "succeeded"
   });
@@ -235,8 +235,7 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
     data: {
       object: {
         id: payment.stripeCheckoutSessionId,
-        payment_intent: "pi_async_checkout",
-        payment_status: "unpaid"
+        payment_intent: "pi_async_checkout"
       }
     }
   });
@@ -278,15 +277,15 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
       object: {
         id: "ch_charge_refund",
         payment_intent: "pi_charge_refund",
-        amount: 42000,
-        amount_refunded: 10000
+        amount: 4200,
+        amount_refunded: 1000
       }
     }
   });
   assert.equal(payment.status, "succeeded");
   assert.equal(payment.refundStatus, "partially_refunded");
   assert.equal(store.refunds.length, 0);
-  assert.equal(prepareRefund(store, payment.id).amount, 32000);
+  assert.equal(prepareRefund(store, payment.id).amount, 3200);
 
   applyStripeEvent(store, {
     id: "evt_charge_refund_partial_with_list",
@@ -295,13 +294,13 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
       object: {
         id: "ch_charge_refund",
         payment_intent: "pi_charge_refund",
-        amount: 42000,
-        amount_refunded: 10000,
+        amount: 4200,
+        amount_refunded: 1000,
         refunds: {
           data: [{
             id: "re_charge_partial",
-            amount: 10000,
-            currency: "krw",
+            amount: 1000,
+            currency: "usd",
             status: "succeeded",
             reason: "requested_by_customer"
           }]
@@ -319,12 +318,12 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
       object: {
         id: "ch_charge_refund",
         payment_intent: "pi_charge_refund",
-        amount: 42000,
-        amount_refunded: 42000,
+        amount: 4200,
+        amount_refunded: 4200,
         refunds: {
           data: [
-            { id: "re_charge_partial", amount: 10000, currency: "krw", status: "succeeded" },
-            { id: "re_charge_remaining", amount: 32000, currency: "krw", status: "succeeded" }
+            { id: "re_charge_partial", amount: 1000, currency: "usd", status: "succeeded" },
+            { id: "re_charge_remaining", amount: 3200, currency: "usd", status: "succeeded" }
           ]
         }
       }
@@ -341,10 +340,10 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
       object: {
         id: "ch_charge_refund",
         payment_intent: "pi_charge_refund",
-        amount: 42000,
-        amount_refunded: 10000,
+        amount: 4200,
+        amount_refunded: 1000,
         refunds: {
-          data: [{ id: "re_charge_partial", amount: 10000, currency: "krw", status: "pending" }]
+          data: [{ id: "re_charge_partial", amount: 1000, currency: "usd", status: "pending" }]
         }
       }
     }
@@ -447,14 +446,14 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
     });
     assert.equal(refund.id, "re_live_test");
     assert.equal(captured.url, "https://api.stripe.com/v1/refunds");
-    assert.equal(captured.options.headers["Idempotency-Key"], "refund-live-test");
-    assert.equal(captured.options.headers["Stripe-Version"], "2026-02-25.clover");
+    assert.equal(new Headers(captured.options.headers).get("idempotency-key"), "refund-live-test");
+    assert.equal(new Headers(captured.options.headers).get("stripe-version"), "2026-02-25.clover");
     const payload = new URLSearchParams(captured.options.body);
     assert.equal(payload.get("payment_intent"), "pi_live_test");
     assert.equal(payload.get("amount"), "1200");
 
     await createStripePaymentIntent({
-      amount: 42000,
+      amount: 4200,
       currency: "KRW",
       methodCode: "card",
       orderId: "ord_live_intent",
@@ -462,7 +461,45 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
       idempotencyKey: "payment-intent-live-test"
     });
     assert.equal(captured.url, "https://api.stripe.com/v1/payment_intents");
-    assert.equal(captured.options.headers["Idempotency-Key"], "payment-intent-live-test");
+    assert.equal(new Headers(captured.options.headers).get("idempotency-key"), "payment-intent-live-test");
+    const intentPayload = new URLSearchParams(captured.options.body);
+    assert.equal(intentPayload.get("automatic_payment_methods[enabled]"), "true");
+    assert.equal(intentPayload.has("payment_method_types[]"), false);
+
+    await createStripeCheckoutSession({
+      amount: 4200,
+      currency: "KRW",
+      methodCode: "card",
+      orderId: "ord_live_checkout",
+      customerEmail: "student@example.com",
+      productName: "Good Vibe Pilates & Yoga",
+      successUrl: "https://example.com/payments/return?status=success&session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl: "https://example.com/payments/return?status=cancel",
+      idempotencyKey: "checkout-live-test"
+    });
+    assert.equal(captured.url, "https://api.stripe.com/v1/checkout/sessions");
+    assert.equal(new Headers(captured.options.headers).get("idempotency-key"), "checkout-live-test");
+    const checkoutPayload = new URLSearchParams(captured.options.body);
+    assert.equal(checkoutPayload.get("origin_context"), "mobile_app");
+    assert.equal(checkoutPayload.get("client_reference_id"), "ord_live_checkout");
+    assert.equal(checkoutPayload.get("metadata[order_id]"), "ord_live_checkout");
+    assert.equal(checkoutPayload.get("payment_intent_data[metadata][order_id]"), "ord_live_checkout");
+    assert.equal(checkoutPayload.get("customer_email"), "student@example.com");
+    assert.equal(checkoutPayload.has("payment_method_types[]"), false);
+
+    await createStripeCheckoutSession({
+      amount: 100,
+      currency: "USD",
+      methodCode: "card",
+      productName: "Good Vibe configuration test",
+      successUrl: "https://example.com/payments/return?status=success&session_id={CHECKOUT_SESSION_ID}",
+      cancelUrl: "https://example.com/payments/return?status=cancel",
+      idempotencyKey: "checkout-standalone-live-test"
+    });
+    const standaloneCheckoutPayload = new URLSearchParams(captured.options.body);
+    assert.equal(standaloneCheckoutPayload.has("client_reference_id"), false);
+    assert.equal(standaloneCheckoutPayload.has("metadata[order_id]"), false);
+    assert.equal(standaloneCheckoutPayload.has("payment_intent_data[metadata][order_id]"), false);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
@@ -477,22 +514,22 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
   delete process.env.STRIPE_MERCHANT_IDENTIFIER;
   try {
     const paymentSheet = await createStripePaymentSheet({
-      amount: 42000,
+      amount: 4200,
       currency: "KRW",
       methodCode: "card",
       orderId: "ord_mock_sheet",
       customerEmail: "student@example.com"
     });
-    assert.equal(paymentSheet.merchantIdentifier, "merchant.com.yomiyoga.studio");
+    assert.equal(paymentSheet.merchantIdentifier, "merchant.com.goodvibe.pilatesyoga");
 
     const checkout = await createStripeCheckoutSession({
-      amount: 42000,
+      amount: 4200,
       currency: "KRW",
       methodCode: "card",
       orderId: "ord_mock_checkout",
       productName: "Good Vibe Pilates & Yoga",
-      successUrl: "yogabooking://payment-return?status=success",
-      cancelUrl: "yogabooking://payment-return?status=cancel"
+      successUrl: "goodvibe://payment-return?status=success",
+      cancelUrl: "goodvibe://payment-return?status=cancel"
     });
     const checkoutUrl = new URL(checkout.url);
     assert.equal(checkoutUrl.searchParams.get("status"), "success");
@@ -500,7 +537,7 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
     assert.equal(checkoutUrl.searchParams.get("mock"), "true");
     await assert.rejects(
       createStripeCheckoutSession({
-        amount: 42000,
+        amount: 4200,
         currency: "KRW",
         methodCode: "card",
         orderId: "ord_bad_checkout",
@@ -559,6 +596,18 @@ const coachAuth = { userId: "usr_coach", activeRole: ROLES.COACH, sessionId: "te
     { now }
   ), "invalid_webhook_payload");
   assertProblem(() => verifyStripeWebhook(malformedPayload, null, ""), "invalid_webhook_payload");
+
+  const originalStripeSecret = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = "sk_test_webhook_requires_signature";
+  try {
+    assertProblem(
+      () => verifyStripeWebhook(payload, null, "", { now }),
+      "stripe_webhook_secret_missing"
+    );
+  } finally {
+    if (originalStripeSecret === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = originalStripeSecret;
+  }
 }
 
 {

@@ -26,8 +26,8 @@ Expected response time: [RESPONSE TARGET]
 ```text
 Operator: [CLIENT LEGAL ENTITY]
 Address: [BUSINESS ADDRESS]
-Privacy policy: https://[CLIENT DOMAIN]/privacy
-Terms: https://[CLIENT DOMAIN]/terms
+Privacy policy: https://good-vibe-pilates-yoga.2316196563.workers.dev/privacy
+Terms: https://good-vibe-pilates-yoga.2316196563.workers.dev/terms
 App version support: iOS 16 or later
 ```
 

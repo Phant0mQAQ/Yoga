@@ -1,7 +1,12 @@
-import type { Booking, MemberCard } from "@/api/types";
+import type { AvailabilitySession, Booking, MemberCard } from "@/api/types";
 
 type UsableCard = Pick<MemberCard, "status" | "expiresAt" | "remainingCredits">;
 type PendingBooking = Pick<Booking, "status" | "courseSessionId">;
+type UpcomingBooking = Pick<Booking, "status" | "endsAt">;
+type SessionCapacity = Pick<
+  AvailabilitySession,
+  "capacity" | "bookedCount" | "participantCount" | "participants" | "startsAt" | "status"
+>;
 
 export type PaymentRegion = {
   country: string;
@@ -65,7 +70,7 @@ export function selectEligibleMemberCard<T extends UsableCard>(
 
 export function resolvePaymentRegion(regionCode?: string | null): PaymentRegion {
   const normalized = regionCode?.trim().toUpperCase();
-  const country = normalized && /^[A-Z]{2}$/.test(normalized) ? normalized : "HK";
+  const country = normalized && /^[A-Z]{2}$/.test(normalized) ? normalized : "US";
   return {
     country,
     currency: CURRENCY_BY_REGION[country] ?? "USD"
@@ -94,6 +99,38 @@ export function pendingBookingsBySession<T extends PendingBooking>(rows: readonl
     }
   }
   return result;
+}
+
+export function reservationCount(session: SessionCapacity) {
+  return session.participantCount ?? session.participants?.length ?? session.bookedCount ?? 0;
+}
+
+export function isSessionBookable(session: SessionCapacity, now: number | Date = Date.now()) {
+  const nowMs = now instanceof Date ? now.getTime() : now;
+  const startsAt = Date.parse(session.startsAt);
+  return session.status === "open"
+    && Number.isFinite(startsAt)
+    && startsAt > nowMs
+    && reservationCount(session) < session.capacity;
+}
+
+export function countBookableSessions(
+  sessions: readonly SessionCapacity[],
+  now: number | Date = Date.now()
+) {
+  return sessions.reduce((count, session) => count + (isSessionBookable(session, now) ? 1 : 0), 0);
+}
+
+export function countUpcomingBookings(
+  bookings: readonly UpcomingBooking[],
+  now: number | Date = Date.now()
+) {
+  const nowMs = now instanceof Date ? now.getTime() : now;
+  return bookings.reduce((count, booking) => {
+    if (booking.status === "cancelled") return count;
+    const endsAt = Date.parse(booking.endsAt);
+    return Number.isFinite(endsAt) && endsAt > nowMs ? count + 1 : count;
+  }, 0);
 }
 
 export function parseBookingIdFromQr(value: string): string | null {

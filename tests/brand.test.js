@@ -25,11 +25,9 @@ assert.equal(cameraPlugin?.[1]?.microphonePermission, false);
 const imagePickerPlugin = appJson.expo.plugins.find((plugin) => Array.isArray(plugin) && plugin[0] === "expo-image-picker");
 assert.equal(imagePickerPlugin?.[1]?.microphonePermission, false);
 
-// These identifiers are intentionally stable so the existing EAS, TestFlight,
-// deep-link, Apple Pay, and production API integrations continue to work.
-assert.equal(appJson.expo.slug, "yomi-yoga");
-assert.equal(appJson.expo.scheme, "yomiyoga");
-assert.equal(appJson.expo.ios.bundleIdentifier, "com.yomiyoga.studio");
+assert.equal(appJson.expo.slug, "good-vibe-pilates-yoga");
+assert.equal(appJson.expo.scheme, "goodvibe");
+assert.equal(appJson.expo.ios.bundleIdentifier, "com.goodvibe.pilatesyoga");
 assert.match(mobilePackage.dependencies.expo, /^~54\./, "Expo must remain on SDK 54");
 
 assert.equal(manifest.name, BRAND_NAME);
@@ -69,13 +67,9 @@ for (const logo of [
 }
 
 for (const removedAsset of [
-  "apps/mobile-expo/assets/yomi-mark-source.png",
   "apps/mobile-expo/assets/icon.png",
   "apps/mobile-expo/assets/adaptive-icon.png",
   "apps/mobile-expo/assets/splash-icon.png",
-  "apps/admin/assets/yomi-icon.png",
-  "apps/mobile/assets/yomi-icon-192.png",
-  "apps/mobile/assets/yomi-icon-512.png"
 ]) {
   assert.equal(fs.existsSync(removedAsset), false, `${removedAsset} should have been replaced`);
 }
@@ -99,9 +93,18 @@ const visibleBrandFiles = [
   "docs/openapi.yaml"
 ];
 
-const oldVisibleBrand = /Yomi Yoga|Yomi Studio|TODAY AT YOMI|Today at Yomi|YOMI MEMBERSHIP|yomi-icon|yomi-mark-source|Yoga Booking API|Yoga booking API/;
+const oldVisibleBrand = /Yoga Booking API|Yoga booking API/;
 for (const file of visibleBrandFiles) {
   assert.doesNotMatch(fs.readFileSync(file, "utf8"), oldVisibleBrand, `${file} contains old visible branding`);
+}
+
+const retiredIdentifier = new RegExp(
+  `${["yo", "mi"].join("")}|${["yoga", "booking"].join("")}|${["Yoga", "Booking", "App"].join("")}`,
+  "i"
+);
+for (const file of sourceTextFiles(".")) {
+  assert.doesNotMatch(file, retiredIdentifier, `${file} still uses a retired project identifier`);
+  assert.doesNotMatch(fs.readFileSync(file, "utf8"), retiredIdentifier, `${file} still uses a retired project identifier`);
 }
 
 console.log("brand tests passed");
@@ -123,4 +126,27 @@ function pngMetadata(file) {
     height: bytes.readUInt32BE(20),
     colorType: bytes[25]
   };
+}
+
+function sourceTextFiles(directory) {
+  const excludedDirectories = new Set([".git", ".expo", "node_modules", "dist", "dist-export-check", "dist-final-check"]);
+  const textExtensions = new Set([".example", ".js", ".json", ".md", ".mjs", ".sql", ".swift", ".toml", ".ts", ".tsx", ".yaml", ".yml"]);
+  const files = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
+      if (
+        !excludedDirectories.has(entry.name)
+        && !entry.name.startsWith(".")
+        && !entry.name.startsWith("dist")
+        && entry.name !== "output"
+      ) {
+        files.push(...sourceTextFiles(`${directory}/${entry.name}`));
+      }
+      continue;
+    }
+    const file = `${directory}/${entry.name}`;
+    if (file.endsWith("tests/brand.test.js")) continue;
+    if (textExtensions.has(entry.name === ".env.example" ? ".example" : file.slice(file.lastIndexOf(".")))) files.push(file);
+  }
+  return files;
 }

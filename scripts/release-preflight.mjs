@@ -27,12 +27,14 @@ for (const asset of [
 ]) {
   check(fs.existsSync(path.join(root, asset)), `Missing brand asset: ${asset}`);
 }
-check(appJson.expo?.ios?.bundleIdentifier === "com.yomiyoga.studio", "Unexpected iOS bundle identifier.");
+check(appJson.expo?.slug === "good-vibe-pilates-yoga", "Unexpected Expo slug.");
+check(appJson.expo?.scheme === "goodvibe", "Unexpected app URL scheme.");
+check(appJson.expo?.ios?.bundleIdentifier === "com.goodvibe.pilatesyoga", "Unexpected iOS bundle identifier.");
 check(
   appJson.expo?.plugins?.some(
     (plugin) => Array.isArray(plugin)
       && plugin[0] === "@stripe/stripe-react-native"
-      && plugin[1]?.merchantIdentifier === "merchant.com.yomiyoga.studio"
+      && plugin[1]?.merchantIdentifier === "merchant.com.goodvibe.pilatesyoga"
   ),
   "Stripe merchant identifier does not match the iOS bundle."
 );
@@ -45,6 +47,16 @@ check(
   fs.readdirSync(path.join(root, "supabase/migrations")).some((name) => name.endsWith(".sql")),
   "No Supabase migration was found."
 );
+for (const artifact of [
+  "Dockerfile",
+  "deploy/alibaba/ecs-compose.yml",
+  "db/alibaba-rds.sql",
+  "scripts/migrate-supabase-to-rds.mjs",
+  "scripts/migrate-supabase-storage-to-oss.mjs",
+  "scripts/deploy-admin-oss.mjs"
+]) {
+  check(fs.existsSync(path.join(root, artifact)), `Missing Alibaba Cloud deployment artifact: ${artifact}`);
+}
 
 if (process.argv.includes("--cloud")) {
   const env = { ...readEnvFile(".env"), ...process.env };
@@ -57,13 +69,56 @@ if (process.argv.includes("--cloud")) {
   requireSecret(env.STRIPE_WEBHOOK_SECRET, "STRIPE_WEBHOOK_SECRET");
   requireSecret(env.INITIAL_ADMIN_EMAIL, "INITIAL_ADMIN_EMAIL");
   requireSecret(env.INITIAL_ADMIN_PASSWORD, "INITIAL_ADMIN_PASSWORD", 12);
+  check(env.AUTH_PROVIDER === "firebase", "AUTH_PROVIDER must be firebase.");
+  requireSecret(env.FIREBASE_WEB_API_KEY, "FIREBASE_WEB_API_KEY");
+  requireSecret(env.COACH_INVITE_CODE, "COACH_INVITE_CODE", 12);
   requireSecret(env.EXPO_PUBLIC_API_BASE_URL, "EXPO_PUBLIC_API_BASE_URL");
-  requireSecret(env.GOOD_VIBE_API_BASE_URL ?? env.YOMI_API_BASE_URL, "GOOD_VIBE_API_BASE_URL");
+  requireSecret(env.GOOD_VIBE_API_BASE_URL, "GOOD_VIBE_API_BASE_URL");
   if (!env.SUPABASE_ACCESS_TOKEN) {
     notices.push("SUPABASE_ACCESS_TOKEN is not set; interactive `supabase login` is required.");
   }
   if (!env.EXPO_TOKEN) {
     notices.push("EXPO_TOKEN is not set; interactive `eas login` is required.");
+  }
+}
+
+if (process.argv.includes("--alibaba")) {
+  const env = { ...readEnvFile(".env.alibaba"), ...process.env };
+  check(env.CLOUD_PROVIDER === "alibaba", "CLOUD_PROVIDER must be alibaba.");
+  check(env.NODE_ENV === "production", "NODE_ENV must be production for Alibaba Cloud release.");
+  requireUrl(env.APP_BASE_URL, "APP_BASE_URL");
+  requireUrl(env.CORS_ALLOWED_ORIGINS?.split(",")[0], "CORS_ALLOWED_ORIGINS");
+  requireSecret(env.APP_SECRET, "APP_SECRET", 32);
+  requirePostgresUrl(env.DATABASE_URL, "DATABASE_URL");
+  check(
+    ["require", "verify-full"].includes(String(env.DATABASE_SSL_MODE).toLowerCase()),
+    "DATABASE_SSL_MODE must be require or verify-full for Alibaba Cloud production."
+  );
+  if (String(env.DATABASE_SSL_MODE).toLowerCase() === "verify-full") {
+    requireSecret(env.DATABASE_SSL_CA_BASE64, "DATABASE_SSL_CA_BASE64", 32);
+  }
+  check(env.OSS_REGION === "oss-us-west-1", "OSS_REGION must be oss-us-west-1 for US West 1.");
+  requireSecret(env.OSS_ACCESS_KEY_ID, "OSS_ACCESS_KEY_ID");
+  requireSecret(env.OSS_ACCESS_KEY_SECRET, "OSS_ACCESS_KEY_SECRET");
+  requireSecret(env.OSS_BUCKET, "OSS_BUCKET");
+  requireUrl(env.OSS_PUBLIC_BASE_URL, "OSS_PUBLIC_BASE_URL");
+  check(env.OSS_ADMIN_REGION === "oss-us-west-1", "OSS_ADMIN_REGION must be oss-us-west-1.");
+  requireSecret(env.OSS_ADMIN_BUCKET, "OSS_ADMIN_BUCKET");
+  requireSecret(env.STRIPE_SECRET_KEY, "STRIPE_SECRET_KEY");
+  requireSecret(env.STRIPE_PUBLISHABLE_KEY, "STRIPE_PUBLISHABLE_KEY");
+  requireSecret(env.STRIPE_WEBHOOK_SECRET, "STRIPE_WEBHOOK_SECRET");
+  requireSecret(env.STRIPE_MERCHANT_IDENTIFIER, "STRIPE_MERCHANT_IDENTIFIER");
+  requireSecret(env.INITIAL_ADMIN_EMAIL, "INITIAL_ADMIN_EMAIL");
+  requireSecret(env.INITIAL_ADMIN_PASSWORD, "INITIAL_ADMIN_PASSWORD", 12);
+  check(env.AUTH_PROVIDER === "firebase", "AUTH_PROVIDER must be firebase.");
+  requireSecret(env.FIREBASE_WEB_API_KEY, "FIREBASE_WEB_API_KEY");
+  requireSecret(env.COACH_INVITE_CODE, "COACH_INVITE_CODE", 12);
+  requireUrl(env.EXPO_PUBLIC_API_BASE_URL, "EXPO_PUBLIC_API_BASE_URL");
+  requireUrl(env.GOOD_VIBE_API_BASE_URL, "GOOD_VIBE_API_BASE_URL");
+  for (const [name, value] of Object.entries(env)) {
+    if (/^(APP_|AUTH_|DATABASE_|FIREBASE_|OSS_|STRIPE_|INITIAL_|EXPO_PUBLIC_|GOOD_VIBE_)/.test(name)) {
+      check(!/replace|example\.com|YOUR_|ENCODED_PASSWORD/i.test(String(value)), `${name} still contains a placeholder.`);
+    }
   }
 }
 
@@ -115,5 +170,16 @@ function requireUrl(value, name, requiredHostSuffix) {
     }
   } catch {
     errors.push(`${name} is missing or is not a valid URL.`);
+  }
+}
+
+function requirePostgresUrl(value, name) {
+  try {
+    const parsed = new URL(value);
+    check(["postgres:", "postgresql:"].includes(parsed.protocol), `${name} must be a PostgreSQL URL.`);
+    check(Boolean(parsed.hostname), `${name} must include a database host.`);
+    check(Boolean(parsed.pathname?.slice(1)), `${name} must include a database name.`);
+  } catch {
+    errors.push(`${name} is missing or is not a valid PostgreSQL URL.`);
   }
 }

@@ -11,6 +11,7 @@ export type User = {
   name: string;
   email?: string;
   phone?: string;
+  avatarUrl?: string | null;
   locale: string;
   roles: Role[];
 };
@@ -27,18 +28,63 @@ export type LoginResponse = {
   token: string;
   session: Session;
   user: User;
+  firebase?: {
+    idToken: string;
+    refreshToken: string;
+    expiresIn: number;
+  };
+};
+
+export type RegistrationStartResponse = {
+  requiresVerification: true;
+  email: string;
+  verificationMethod?: "link" | "code";
+  expiresAt?: string;
 };
 
 export type Course = {
   id: string;
   title: string | LocalizedText;
   description?: string | LocalizedText;
+  imageUrl?: string | null;
   durationMinutes?: number;
   priceAmount: number;
   currency: string;
   capacity: number;
   memberCardDeductCount: number;
   active?: boolean;
+};
+
+export type ContentBlock = {
+  id: string;
+  type: "banner" | "feature" | "knowledge" | "recommendation";
+  title: string | LocalizedText;
+  description?: string | LocalizedText;
+  imageUrl?: string | null;
+  target?: string;
+  sortOrder?: number;
+  active?: boolean;
+};
+
+export type Product = {
+  id: string;
+  title: string | LocalizedText;
+  description?: string | LocalizedText;
+  imageUrl?: string | null;
+  category?: string;
+  priceAmount: number;
+  currency: string;
+  stock: number;
+  active?: boolean;
+};
+
+export type Home = {
+  banners: ContentBlock[];
+  features: ContentBlock[];
+  knowledge: ContentBlock[];
+  recommendedCourses: Course[];
+  recommendedCoaches: Coach[];
+  storeRecommendations: Product[];
 };
 
 export type Coach = {
@@ -59,6 +105,7 @@ export type AvailabilitySession = {
   endsAt: string;
   capacity: number;
   bookedCount: number;
+  status: "draft" | "open" | "closed" | "cancelled";
   remainingCapacity: number;
   course?: Course;
   coach?: Coach;
@@ -96,10 +143,20 @@ export type MemberCard = {
   id: string;
   userId: string;
   planId: string;
-  status: "active" | "frozen" | "expired" | "transferred" | "upgraded";
+  status: "active" | "frozen" | "expired" | "transferred" | "upgraded" | "cancelled";
   totalCredits: number;
   remainingCredits: number;
   expiresAt: string;
+  autoRenew?: boolean;
+  autoRenewCancelledAt?: string;
+};
+
+export type PrivacyRequest = {
+  id: string;
+  userId: string;
+  type: "access" | "correction" | "deletion" | "limit";
+  status: "pending" | "completed" | "denied";
+  requestedAt: string;
 };
 
 export type Order = {
@@ -160,7 +217,7 @@ export type AuditLog = {
 };
 
 export type PresignedUpload = {
-  storage: "supabase" | "memory";
+  storage: "supabase" | "oss" | "memory";
   objectKey: string;
   uploadUrl: string;
   publicUrl: string;

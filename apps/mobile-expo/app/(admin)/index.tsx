@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
-import { adminApi, paymentMethods } from "@/api/client";
+import { adminApi, paymentMethods, uploadAdminFile } from "@/api/client";
 import type { AdminMember, MemberCard, Payment } from "@/api/types";
 import { Field, GhostButton, Loading, Metric, Pill, PrimaryButton, Row, Screen, SectionHeader } from "@/components/ui";
 import i18n from "@/i18n";
@@ -266,6 +266,7 @@ function ResourceHub({ resources, locale }: { resources: readonly AdminResource[
 function ResourceList({ resource, locale }: { resource: AdminResource; locale: string }) {
   const { t } = useTranslation();
   const { colors, styles } = useAdminTheme();
+  const [creating, setCreating] = useState(false);
   const query = useQuery({
     queryKey: ["admin-resource", resource],
     queryFn: () => adminApi.resource<Record<string, unknown>>(resource)
@@ -283,16 +284,45 @@ function ResourceList({ resource, locale }: { resource: AdminResource; locale: s
 
   const managed = isManagedResource(resource);
 
+  async function createResource(imageUrl?: string) {
+    if (!managed || creating) return;
+    setCreating(true);
+    try {
+      await adminApi.createResource(resource, sampleEntity(resource, imageUrl));
+      await query.refetch();
+    } catch (error) {
+      Alert.alert(t("adminCreateResourceError"), localizedApiError(error, t));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function beginCreate() {
+    if (resource !== "courses") {
+      confirmCreate(t("adminConfirmCreateTitle", { resource: resourceLabel(t, resource) }), () => createResource());
+      return;
+    }
+    Alert.alert(t("adminCourseImageChoiceTitle"), t("adminCourseImageChoiceMessage"), [
+      { text: t("adminCancel"), style: "cancel" },
+      { text: t("adminCreateWithoutImage"), onPress: () => void createResource() },
+      {
+        text: t("adminChooseCourseImage"),
+        onPress: () => void (async () => {
+          const imageUrl = await chooseAndUploadCourseImage(t);
+          if (imageUrl) await createResource(imageUrl);
+        })()
+      }
+    ]);
+  }
+
   return (
     <View style={styles.list}>
       {managed ? (
         <PrimaryButton
           title={t("adminCreateSampleResource", { resource: resourceLabel(t, resource) })}
           icon="add"
-          onPress={() => confirmCreate(t("adminConfirmCreateTitle", { resource: resourceLabel(t, resource) }), async () => {
-            await adminApi.createResource(resource, sampleEntity(resource));
-            await query.refetch();
-          })}
+          disabled={creating}
+          onPress={beginCreate}
         />
       ) : (
         <View accessibilityRole="alert" style={styles.readOnlyNotice}>
@@ -308,6 +338,14 @@ function ResourceList({ resource, locale }: { resource: AdminResource; locale: s
         const active = item.active !== false;
         return (
           <View key={id} style={styles.resourceCard}>
+            {resource === "courses" && typeof item.imageUrl === "string" ? (
+              <Image
+                source={{ uri: item.imageUrl }}
+                style={styles.courseImage}
+                resizeMode="cover"
+                accessibilityLabel={entityTitle(item, resource, locale, t)}
+              />
+            ) : null}
             <View style={styles.resourceTop}>
               <View style={styles.resourceHeading}>
                 <Text style={styles.resourceTitle}>{entityTitle(item, resource, locale, t)}</Text>
@@ -467,7 +505,7 @@ function Settings({ locale }: { locale: string }) {
   const [uploadPublicUrl, setUploadPublicUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const audit = useQuery({ queryKey: ["admin-audit"], queryFn: adminApi.auditLogs });
-  const methods = useQuery({ queryKey: ["admin-payment-methods"], queryFn: () => paymentMethods("KR", "KRW") });
+  const methods = useQuery({ queryKey: ["admin-payment-methods"], queryFn: () => paymentMethods("US", "USD") });
   if (audit.isLoading || methods.isLoading) return <Loading />;
 
   async function chooseAndUploadImage() {
@@ -503,18 +541,7 @@ function Settings({ locale }: { locale: string }) {
       });
       const localResponse = await fetch(asset.uri);
       if (!localResponse.ok) throw new Error(t("unableToReadImage"));
-      const imageBody = await localResponse.blob();
-      const uploadResponse = await fetch(upload.uploadUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": contentType,
-          ...upload.headers
-        },
-        body: imageBody
-      });
-      if (!uploadResponse.ok) {
-        throw new Error(t("uploadPutFailed", { status: uploadResponse.status }));
-      }
+      await uploadAdminFile(upload, contentType, await localResponse.blob());
 
       setUploadPublicUrl(upload.publicUrl);
       Alert.alert(t("uploadCompleteTitle"), t("uploadCompleteMessage"));
@@ -535,7 +562,7 @@ function Settings({ locale }: { locale: string }) {
         <Text style={styles.pageMeta}>{t("adminSettingsDescription")}</Text>
       </View>
 
-      <SectionHeader title={t("adminStripeMethods")} meta="KR · KRW" />
+      <SectionHeader title={t("adminStripeMethods")} meta="US · USD" />
       {methods.error ? (
         <QueryErrorNotice title={t("paymentMethodsErrorTitle")} error={methods.error} onRetry={methods.refetch} />
       ) : (
@@ -662,7 +689,45 @@ async function runAction(title: string, action: () => Promise<unknown>) {
   }
 }
 
-function sampleEntity(resource: ManagedResource): Record<string, unknown> {
+async function chooseAndUploadCourseImage(t: TFunction) {
+  const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+  if (!permission.granted) {
+    Alert.alert(t("photoPermissionTitle"), t("photoPermissionMessage"));
+    return null;
+  }
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    allowsEditing: true,
+    aspect: [16, 9],
+    quality: 0.85
+  });
+  if (result.canceled || !result.assets[0]) return null;
+
+  const asset = result.assets[0];
+  const contentType = asset.mimeType ?? "image/jpeg";
+  const fileName = asset.fileName ?? `course-${Date.now()}.${extensionForMimeType(contentType)}`;
+  if (asset.fileSize && asset.fileSize > 10_000_000) {
+    Alert.alert(t("uploadFailedTitle"), t("avatarTooLarge"));
+    return null;
+  }
+  try {
+    const upload = await adminApi.presignUpload({
+      scope: "courses",
+      fileName,
+      contentType,
+      fileSize: asset.fileSize
+    });
+    const localResponse = await fetch(asset.uri);
+    if (!localResponse.ok) throw new Error(t("unableToReadImage"));
+    await uploadAdminFile(upload, contentType, await localResponse.blob());
+    return upload.publicUrl;
+  } catch (error) {
+    Alert.alert(t("uploadFailedTitle"), localizedApiError(error, t));
+    return null;
+  }
+}
+
+function sampleEntity(resource: ManagedResource, imageUrl?: string): Record<string, unknown> {
   switch (resource) {
     case "courses":
       return {
@@ -674,9 +739,10 @@ function sampleEntity(resource: ManagedResource): Record<string, unknown> {
         },
         durationMinutes: 60,
         priceAmount: 50000,
-        currency: "KRW",
+        currency: "USD",
         capacity: 8,
         memberCardDeductCount: 1,
+        ...(imageUrl ? { imageUrl } : {}),
         tags: ["sample"],
         active: true
       };
@@ -703,7 +769,7 @@ function sampleEntity(resource: ManagedResource): Record<string, unknown> {
         },
         category: "yoga_mat",
         priceAmount: 30000,
-        currency: "KRW",
+        currency: "USD",
         stock: 5,
         active: true
       };
@@ -889,6 +955,7 @@ function createStyles(colors: ThemeColors) {
   miniStat: { color: colors.muted, fontSize: 10 },
   roundAction: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: colors.line, alignItems: "center", justifyContent: "center" },
   resourceCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, padding: spacing.lg, gap: spacing.md },
+  courseImage: { width: "100%", height: 168, borderRadius: radius.md, backgroundColor: colors.surfaceMuted },
   resourceTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", gap: spacing.md },
   resourceHeading: { flex: 1, minWidth: 0 },
   resourceTitle: { color: colors.text, fontSize: 14, fontWeight: "800" },

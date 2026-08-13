@@ -8,9 +8,9 @@
 
 - ZIP 包会包含 Expo iOS 源码、API/后台源码、数据库迁移、测试、图标源文件和 App Store 文案模板。
 - ZIP 包不会包含 `.env`、Supabase 服务端密钥、Stripe Secret Key、Apple `.p8` 私钥、证书、Provisioning Profile、登录令牌或现有云平台账号密码。
-- 源码交付不等于账号和云资源转移。客户若要长期独立运营，还需取得或重建 Supabase、Render、Vercel、Stripe、域名和邮箱服务的所有权。
-- 当前可配置 API 地址为 `https://yomi-yoga-api.onrender.com/api/v1`。正式发布前，应确认该服务由客户控制、使用生产数据库且能够长期在线。
-- 交付版已经移除原 Expo `owner` 和 `projectId` 绑定。客户必须在自己的 Expo 账号下运行 `eas init`。
+- 源码交付不等于账号和云资源转移。长期独立运营需要持续控制 Cloudflare、Stripe、Expo、Apple Developer、域名和邮箱服务。
+- 当前生产 API 地址为 `https://good-vibe-pilates-yoga.2316196563.workers.dev/api/v1`，使用 Cloudflare Worker 与 D1。
+- 当前 Expo 项目已绑定 `@yogayoga/good-vibe-pilates-yoga`，EAS Project ID 为 `cf7a295f-471a-4efb-9931-bed4b2236f7d`。
 
 ## 目录说明
 
@@ -77,9 +77,9 @@ npx eas-cli@latest init
 当前默认值：
 
 ```text
-Bundle ID: com.yomiyoga.studio
-Apple Pay Merchant ID: merchant.com.yomiyoga.studio
-URL Scheme: yomiyoga
+Bundle ID: com.goodvibe.pilatesyoga
+Apple Pay Merchant ID: merchant.com.goodvibe.pilatesyoga
+URL Scheme: goodvibe
 ```
 
 客户必须确认 Bundle ID 和 Merchant ID 能在自己的 Apple Developer Team 中注册。如果已被其他团队占用，应在第一次生产构建前同时修改：
@@ -96,9 +96,9 @@ Bundle ID 一旦随已上架版本发布，不应再更改。
 在 Expo Dashboard 的 Project settings > Environment variables 中建立 `production` 环境，或执行：
 
 ```powershell
-npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_API_BASE_URL --value https://YOUR_API_HOST/api/v1 --visibility plaintext
+npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_API_BASE_URL --value https://good-vibe-pilates-yoga.2316196563.workers.dev/api/v1 --visibility plaintext
 npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY --value pk_live_REPLACE_WITH_CLIENT_KEY --visibility plaintext
-npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER --value merchant.com.yomiyoga.studio --visibility plaintext
+npx eas-cli@latest env:create --environment production --name EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER --value merchant.com.goodvibe.pilatesyoga --visibility plaintext
 npx eas-cli@latest env:list --environment production
 ```
 
@@ -114,9 +114,9 @@ npm run preflight
 cd apps\mobile-expo
 npx expo-doctor
 npx tsc --noEmit
-$env:EXPO_PUBLIC_API_BASE_URL="https://YOUR_API_HOST/api/v1"
+$env:EXPO_PUBLIC_API_BASE_URL="https://good-vibe-pilates-yoga.2316196563.workers.dev/api/v1"
 $env:EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY="pk_live_REPLACE_WITH_CLIENT_KEY"
-$env:EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER="merchant.com.yomiyoga.studio"
+$env:EXPO_PUBLIC_STRIPE_MERCHANT_IDENTIFIER="merchant.com.goodvibe.pilatesyoga"
 npx expo export --platform ios --output-dir dist-ios-check
 ```
 

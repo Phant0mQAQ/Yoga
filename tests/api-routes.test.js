@@ -7,7 +7,15 @@ const base = `http://localhost:${PORT}/api/v1`;
 
 const server = spawn(process.execPath, ["apps/api/server.js"], {
   cwd: process.cwd(),
-  env: { ...process.env, PORT, STRIPE_SECRET_KEY: "", STRIPE_WEBHOOK_SECRET: "" },
+  env: {
+    ...process.env,
+    PORT,
+    NODE_ENV: "test",
+    EMAIL_DELIVERY_MODE: "console",
+    COACH_INVITE_CODE: "test-coach-invite-2026",
+    STRIPE_SECRET_KEY: "",
+    STRIPE_WEBHOOK_SECRET: ""
+  },
   stdio: ["ignore", "pipe", "pipe"]
 });
 
@@ -21,13 +29,20 @@ try {
   }
   assert.equal((await fetch(`http://localhost:${PORT}/health`)).status, 200);
 
+  const paymentCatalogResponse = await fetch(`${base}/payments/methods?scope=all`);
+  assert.equal(paymentCatalogResponse.status, 200);
+  assert.deepEqual(
+    (await paymentCatalogResponse.json()).map((method) => method.code),
+    ["card", "paypal", "alipay", "wechat_pay", "kakao_pay", "naver_pay", "samsung_pay", "payco"]
+  );
+
   const paymentReturn = await fetch(`http://localhost:${PORT}/payments/return?status=success&locale=zh-Hans&session_id=cs_test_bridge`);
   assert.equal(paymentReturn.status, 200);
   assert.match(paymentReturn.headers.get("content-type"), /^text\/html/);
   assert.equal(paymentReturn.headers.get("cache-control"), "no-store");
   const paymentReturnHtml = await paymentReturn.text();
   assert.match(paymentReturnHtml, /<html lang="zh-Hans">/);
-  assert.match(paymentReturnHtml, /yomiyoga:\/\/payment-return\?status=success(?:&amp;|&)locale=zh-Hans(?:&amp;|&)session_id=cs_test_bridge/);
+  assert.match(paymentReturnHtml, /goodvibe:\/\/payment-return\?status=success(?:&amp;|&)locale=zh-Hans(?:&amp;|&)session_id=cs_test_bridge/);
   assert.match(paymentReturnHtml, /应用将从服务器刷新最终确认状态/);
 
   const hostileQuery = new URLSearchParams({
@@ -39,7 +54,7 @@ try {
   const hostileHtml = await hostileReturn.text();
   assert.equal(hostileReturn.status, 200);
   assert.match(hostileHtml, /<html lang="en">/);
-  assert.match(hostileHtml, /yomiyoga:\/\/payment-return\?status=pending(?:&amp;|&)locale=en/);
+  assert.match(hostileHtml, /goodvibe:\/\/payment-return\?status=pending(?:&amp;|&)locale=en/);
   assert.ok(!hostileHtml.includes('<img src=x onerror=alert(1)>'));
   assert.ok(!hostileHtml.includes('<script>alert(1)</script>'));
 
@@ -58,6 +73,66 @@ try {
   assert.equal(malformedResponse.status, 400);
   assert.equal((await malformedResponse.json()).error, "invalid_json");
 
+  const registered = await api("/auth/register", {
+    method: "POST",
+    expectStatus: 201,
+    body: {
+      name: "Shared Mobile Member",
+      email: "shared.member@example.com",
+      password: "SharedPass2026",
+      role: "student",
+      locale: "zh-Hans"
+    }
+  });
+  assert.equal(registered.email, "shared.member@example.com");
+  assert.equal(registered.requiresVerification, true);
+  assert.equal((await api("/auth/login", {
+    method: "POST",
+    expectStatus: 403,
+    body: {
+      identifier: "shared.member@example.com",
+      password: "SharedPass2026",
+      role: "student",
+      locale: "en"
+    }
+  })).error, "email_not_verified");
+  assert.equal((await api("/auth/register", {
+    method: "POST",
+    expectStatus: 403,
+    body: {
+      name: "Unsafe Admin",
+      email: "unsafe.admin@example.com",
+      password: "SharedPass2026",
+      role: "admin",
+      locale: "en"
+    }
+  })).error, "role_registration_restricted");
+  assert.equal((await api("/auth/register", {
+    method: "POST",
+    expectStatus: 403,
+    body: {
+      name: "Uninvited Coach",
+      email: "uninvited.coach@example.com",
+      password: "SharedPass2026",
+      role: "coach",
+      inviteCode: "wrong-code",
+      locale: "en"
+    }
+  })).error, "invalid_coach_invite_code");
+  const invitedCoachRegistration = await api("/auth/register", {
+    method: "POST",
+    expectStatus: 201,
+    body: {
+      name: "Invited Coach",
+      email: "invited.coach@example.com",
+      password: "SharedPass2026",
+      role: "coach",
+      inviteCode: "test-coach-invite-2026",
+      locale: "en"
+    }
+  });
+  assert.equal(invitedCoachRegistration.email, "invited.coach@example.com");
+
   const admin = await loginAs("admin@example.com", "admin");
   const staff = await loginAs("staff@example.com", "staff");
   const coach = await loginAs("coach@example.com", "coach");
@@ -67,6 +142,40 @@ try {
 
   const dashboard = await api("/admin/dashboard", { token: admin.token });
   assert.equal(typeof dashboard.metrics.members, "number");
+
+  const courseImageUrl = "https://cdn.example.com/courses/signature-flow.jpg";
+  const createdCourse = await api("/admin/courses", {
+    method: "POST",
+    token: admin.token,
+    idempotencyKey: "api-test-course-image",
+    expectStatus: 201,
+    body: {
+      id: "course_with_image",
+      title: { en: "Signature Flow" },
+      description: { en: "A course with a configured cover image." },
+      imageUrl: courseImageUrl,
+      durationMinutes: 60,
+      priceAmount: 3800,
+      currency: "USD",
+      capacity: 8,
+      memberCardDeductCount: 1,
+      tags: []
+    }
+  });
+  assert.equal(createdCourse.imageUrl, courseImageUrl);
+  assert.equal(createdCourse.active, true);
+  assert.equal((await api("/courses?locale=en")).find((course) => course.id === createdCourse.id)?.imageUrl, courseImageUrl);
+  await api(`/admin/courses/${createdCourse.id}`, {
+    method: "PATCH",
+    token: admin.token,
+    idempotencyKey: "api-test-course-hide",
+    body: { active: false }
+  });
+  assert.equal((await api("/courses?locale=en")).some((course) => course.id === createdCourse.id), false);
+  assert.equal(
+    (await api("/home?locale=en")).recommendedCourses.some((course) => course.id === createdCourse.id),
+    false
+  );
 
   const sessionStartsAt = new Date(Date.now() + 3 * 86_400_000);
   const createdSession = await api("/admin/course-sessions", {
@@ -80,14 +189,30 @@ try {
       coachId: "coach_sora",
       startsAt: sessionStartsAt.toISOString(),
       endsAt: new Date(sessionStartsAt.getTime() + 3_600_000).toISOString(),
-      capacity: 3,
-      status: "open"
+      capacity: 3
     }
   });
   assert.equal(createdSession.bookedCount, 0);
+  assert.equal(createdSession.status, "open");
   const createdAvailability = (await api("/availability?locale=en"))
     .find((session) => session.id === createdSession.id);
   assert.equal(createdAvailability.remainingCapacity, 3);
+  const pastStart = new Date(Date.now() - 7_200_000);
+  const closedPastSession = await api(`/admin/course-sessions/${createdSession.id}`, {
+    method: "PATCH",
+    token: admin.token,
+    idempotencyKey: "api-test-session-auto-close",
+    body: {
+      startsAt: pastStart.toISOString(),
+      endsAt: new Date(pastStart.getTime() + 3_600_000).toISOString(),
+      status: "open"
+    }
+  });
+  assert.equal(closedPastSession.status, "closed");
+  assert.equal(
+    (await api("/availability?locale=en")).some((session) => session.id === createdSession.id),
+    false
+  );
 
   const invalidSession = await api("/admin/course-sessions", {
     method: "POST",
@@ -192,6 +317,22 @@ try {
     body: { roles: ["staff", "staff"] }
   });
   assert.deepEqual(normalizedRoles.roles, ["staff"]);
+  const extraAdminGrant = await api("/admin/members/usr_staff", {
+    method: "PATCH",
+    token: admin.token,
+    idempotencyKey: "api-test-fixed-admin-only",
+    expectStatus: 409,
+    body: { roles: ["staff", "admin"] }
+  });
+  assert.equal(extraAdminGrant.error, "fixed_admin_only");
+  const fixedAdminEmailChange = await api("/admin/members/usr_admin", {
+    method: "PATCH",
+    token: admin.token,
+    idempotencyKey: "api-test-fixed-admin-email",
+    expectStatus: 409,
+    body: { email: "another.admin@example.com" }
+  });
+  assert.equal(fixedAdminEmailChange.error, "fixed_admin_identity");
   const lastAdminRemoval = await api("/admin/members/usr_admin", {
     method: "PATCH",
     token: admin.token,
@@ -228,8 +369,8 @@ try {
       currency: "KRW",
       country: "KR",
       methodCode: "card",
-      successUrl: "yomiyoga://untrusted-return?status=success",
-      cancelUrl: "yomiyoga://untrusted-return?status=cancel"
+      successUrl: "goodvibe://untrusted-return?status=success",
+      cancelUrl: "goodvibe://untrusted-return?status=cancel"
     }
   });
   const checkoutReturnUrl = new URL(checkout.stripe.url);
@@ -264,6 +405,43 @@ try {
   ), false);
 
   const student = await loginAs("student@example.com", "student");
+  assert.equal((await api("/me", { token: student.token })).user.avatarUrl, null);
+  assert.equal((await api("/me/avatar-upload", {
+    method: "POST",
+    token: student.token,
+    expectStatus: 400,
+    body: { fileName: "avatar.txt", contentType: "text/plain", fileSize: 12 }
+  })).error, "invalid_avatar_type");
+  const avatarUpload = await api("/me/avatar-upload", {
+    method: "POST",
+    token: student.token,
+    body: { fileName: "profile.png", contentType: "image/png", fileSize: 7 }
+  });
+  assert.match(avatarUpload.objectKey, /^avatars\/usr_student\//);
+  assert.equal((await fetch(avatarUpload.uploadUrl, {
+    method: "PUT",
+    headers: { "Content-Type": "image/png" },
+    body: "PNGDATA"
+  })).status, 204);
+  const avatarUser = await api("/me/avatar", {
+    method: "PATCH",
+    token: student.token,
+    body: { objectKey: avatarUpload.objectKey }
+  });
+  assert.equal(avatarUser.avatarUrl, avatarUpload.publicUrl);
+  assert.equal((await api("/me", { token: student.token })).user.avatarUrl, avatarUpload.publicUrl);
+  assert.equal((await api("/me/avatar", {
+    method: "PATCH",
+    token: student.token,
+    expectStatus: 400,
+    body: { objectKey: "avatars/usr_admin/stolen.png" }
+  })).error, "invalid_avatar_object");
+  assert.equal((await api("/me/avatar", {
+    method: "PATCH",
+    token: student.token,
+    expectStatus: 409,
+    body: { objectKey: "avatars/usr_student/not-uploaded.png" }
+  })).error, "avatar_upload_incomplete");
   const missingPaymentKey = await api("/payments/stripe/payment-sheet", {
     method: "POST",
     token: student.token,
@@ -288,7 +466,10 @@ try {
   assert.equal(duplicateBooking.error, "duplicate_booking");
   const availability = await api("/availability?locale=en");
   const bookedSession = availability.find((session) => session.id === "sess_flow_1");
-  assert.ok(bookedSession.participants.some((person) => person.id === "usr_student"));
+  assert.equal(
+    bookedSession.participants.find((person) => person.id === "usr_student").avatarUrl,
+    avatarUpload.publicUrl
+  );
   assert.equal(bookedSession.participantCount, 1);
 
   const order = await api("/orders", {
@@ -381,6 +562,24 @@ try {
   assert.equal(orderPayments.filter((payment) => payment.status === "failed").length, 1);
   const productsAfterExpiry = await api("/products");
   assert.equal(productsAfterExpiry.find((product) => product.id === "prod_mat").stock, 20);
+  await api("/admin/products/prod_mat", {
+    method: "PATCH",
+    token: admin.token,
+    idempotencyKey: "api-test-product-hide",
+    body: { active: false }
+  });
+  assert.equal((await api("/products")).some((product) => product.id === "prod_mat"), false);
+  assert.equal(
+    (await api("/home?locale=en")).storeRecommendations.some((product) => product.id === "prod_mat"),
+    false
+  );
+  assert.equal((await api("/orders", {
+    method: "POST",
+    token: student.token,
+    idempotencyKey: "api-test-inactive-product-order",
+    expectStatus: 409,
+    body: { items: [{ productId: "prod_mat", quantity: 1 }] }
+  })).error, "product_inactive");
 
   const updatedEmail = await api("/admin/members/usr_student", {
     method: "PATCH",
@@ -393,7 +592,7 @@ try {
   const oldEmailLogin = await api("/auth/login", {
     method: "POST",
     expectStatus: 401,
-    body: { email: "student@example.com", password: "Yomi@2026", role: "student", locale: "en" }
+    body: { email: "student@example.com", password: "GoodVibe@2026", role: "student", locale: "en" }
   });
   assert.equal(oldEmailLogin.error, "invalid_credentials");
 
@@ -435,7 +634,7 @@ try {
 async function loginAs(identifier, role) {
   return api("/auth/login", {
     method: "POST",
-    body: { email: identifier, password: "Yomi@2026", role, locale: "en" }
+    body: { email: identifier, password: "GoodVibe@2026", role, locale: "en" }
   });
 }
 

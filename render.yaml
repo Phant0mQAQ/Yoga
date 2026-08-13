@@ -1,9 +1,10 @@
+# Legacy rollback configuration. The primary production target is Alibaba Cloud US West.
 services:
   - type: web
-    name: yomi-yoga-api
+    name: good-vibe-pilates-yoga-api
     runtime: node
-    region: singapore
-    plan: free
+    region: oregon
+    plan: starter
     numInstances: 1
     buildCommand: npm install --omit=dev
     startCommand: npm start
@@ -11,12 +12,38 @@ services:
     autoDeployTrigger: checksPass
     envVars:
       - key: NODE_ENV
-        value: staging
+        value: production
       - key: APP_SECRET
         generateValue: true
+      - key: AUTH_PROVIDER
+        value: firebase
+      - key: FIREBASE_WEB_API_KEY
+        sync: false
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SECRET_KEY
         sync: false
       - key: STRIPE_MERCHANT_IDENTIFIER
-        value: merchant.com.yomiyoga.studio
+        value: merchant.com.goodvibe.pilatesyoga
+      - key: APP_BASE_URL
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: INITIAL_ADMIN_EMAIL
+        sync: false
+      - key: INITIAL_ADMIN_PASSWORD
+        sync: false
+      - key: LEGAL_OPERATOR_NAME
+        sync: false
+      - key: LEGAL_POSTAL_ADDRESS
+        sync: false
+      - key: PRIVACY_EMAIL
+        sync: false
+      - key: SUPPORT_EMAIL
+        sync: false
+      - key: LEGAL_EFFECTIVE_DATE
+        value: July 16, 2026

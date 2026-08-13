@@ -5,6 +5,7 @@ import vm from "node:vm";
 const html = fs.readFileSync("apps/mobile/index.html", "utf8");
 const script = fs.readFileSync("apps/mobile/app.js", "utf8");
 const styles = fs.readFileSync("apps/mobile/styles.css", "utf8");
+const expoApiClient = fs.readFileSync("apps/mobile-expo/src/api/client.ts", "utf8");
 
 const messagesStart = script.indexOf("const messages = ");
 const messagesEnd = script.indexOf("\n\nconst $", messagesStart);
@@ -56,7 +57,13 @@ for (const key of [
   "requestFailed",
   "signingIn",
   "retry",
+  "refresh",
   "dataLoadFailed",
+  "changeProfilePhoto",
+  "uploadingProfilePhoto",
+  "avatarUpdated",
+  "avatarTooLarge",
+  "invalidAvatarType",
   "active",
   "checkedIn",
   "pendingPayment"
@@ -91,7 +98,22 @@ assert.match(script, /matchMedia\?\.\("\(prefers-color-scheme: dark\)"\)/);
 assert.match(script, /document\.documentElement\.dataset\.theme = state\.theme/);
 assert.match(script, /id="themeToggle"/);
 assert.match(script, /paymentRegion: preferredPaymentRegion\(\)/);
-assert.match(script, /const \{ country, currency \} = state\.paymentRegion/);
+assert.match(script, /api\("\/payments\/methods\?scope=all"\)/);
+assert.match(script, /function paymentMethodIcon\(code\)/);
+assert.match(script, /function paymentMethodsForDisplay\(methods\)/);
+assert.match(script, /<details class="payment-disclosure">/);
+const studentHomeSource = script.slice(script.indexOf("function studentContent()"), script.indexOf("function coachContent()"));
+assert.doesNotMatch(studentHomeSource, /method-grid|copy\("paymentMethods"\)/);
+assert.match(script, /code: "apple_pay"/);
+assert.match(script, /code: "google_pay"/);
+assert.doesNotMatch(script, /code: "link"/);
+assert.doesNotMatch(script, /code: "kr_card"/);
+assert.match(script, /function cardNetworkLogos\(\)/);
+for (const network of ["Visa", "Mastercard", "American Express", "Discover", "JCB", "Diners Club", "UnionPay"]) {
+  assert.ok(script.includes(network), `missing card-network logo for ${network}`);
+}
+assert.match(script, /unionpay\.svg/);
+assert.match(script, /\/app\/assets\/payment\//);
 assert.equal(
   /state\.locale === "ko" \? "KR"/.test(script),
   false,
@@ -127,7 +149,22 @@ assert.doesNotMatch(script, /booking\.status !== "checked_in"/);
 assert.match(script, /state\.status = localizePwaError\(error\)/);
 assert.match(script, /role="status" aria-live="polite"/);
 assert.match(script, /id="retryLoad"/);
+assert.match(script, /id="refreshData"/);
 assert.match(script, /async function retryDataLoad\(\)/);
+assert.match(script, /async function refreshDataSilently\(\)/);
+assert.match(script, /window\.addEventListener\("focus"/);
+assert.match(script, /document\.addEventListener\("visibilitychange"/);
+assert.match(script, /window\.setInterval/);
+assert.match(script, /home\.recommendedCourses/);
+assert.match(script, /home\.storeRecommendations/);
+assert.match(script, /function courseCatalogCard\(course\)/);
+assert.match(script, /function contentCard\(block\)/);
+assert.match(script, /function productCard\(product\)/);
+assert.match(
+  script,
+  /state\.status = copy\("requestSubmitted"\);\s+await loadData\(\);\s+render\(\);/,
+  "membership cancellation success must render the refreshed status"
+);
 assert.doesNotMatch(script, /api\(`\/bookings\?locale=\$\{state\.locale\}`\)\.catch/);
 assert.doesNotMatch(script, /api\("\/member-cards"\)\.catch/);
 assert.match(
@@ -143,6 +180,57 @@ assert.match(styles, /:root\[data-theme="dark"\]/);
 assert.match(styles, /html\[data-theme="dark"\] \{ color-scheme: dark; \}/);
 assert.match(styles, /\.theme-toggle/);
 assert.match(styles, /--nav-bg:/);
+assert.match(styles, /\.metric strong \{[^}]*color: var\(--ink\)/);
+assert.match(styles, /\.class-card:not\(\.featured\)[^}]*color: var\(--ink\)/);
+assert.match(script, /function courseImageMarkup\(course\)/);
+assert.match(script, /error\.code = "invalid_response"/);
+assert.doesNotMatch(
+  expoApiClient,
+  /data = \{ message: rawBody \}/,
+  "Expo must not render HTML upstream error pages as API error messages"
+);
+assert.match(expoApiClient, /"invalid_response"/);
+assert.match(script, /course\?\.imageUrl/);
+assert.match(script, /if \(!candidate\) return "";/);
+assert.match(styles, /\.course-image \{/);
+assert.match(script, /function attendeeAvatar\(person\)/);
+assert.match(script, /person\?\.avatarUrl/);
+assert.match(script, /<img src="\$\{escapeHtml\(avatarUrl\)\}" alt="" loading="lazy"/);
+assert.match(script, /id="avatarFile" class="visually-hidden" type="file"/);
+assert.match(script, /accept="image\/jpeg,image\/png,image\/webp,image\/heic,image\/heif"/);
+assert.match(script, /async function uploadProfilePhoto\(file\)/);
+assert.match(script, /api\("\/me\/avatar-upload"/);
+assert.match(script, /method: "PUT"/);
+assert.match(script, /api\("\/me\/avatar"/);
+assert.match(styles, /\.profile-avatar \{/);
+assert.match(styles, /\.avatar img \{/);
+assert.match(styles, /\.catalog-grid \{/);
+assert.match(styles, /\.editorial-card \{/);
+
+const sessionMetricsStart = script.indexOf("function isSessionFull");
+const sessionMetricsEnd = script.indexOf("\n\nfunction hasActiveBookingForSession", sessionMetricsStart);
+assert.notEqual(sessionMetricsStart, -1, "session metric helpers are missing");
+assert.notEqual(sessionMetricsEnd, -1, "session metric helper boundary is missing");
+const sessionMetricsContext = {};
+vm.runInNewContext(script.slice(sessionMetricsStart, sessionMetricsEnd), sessionMetricsContext);
+const metricNow = Date.parse("2026-07-26T00:00:00.000Z");
+assert.equal(sessionMetricsContext.isSessionBookable({
+  status: "open",
+  startsAt: "2026-07-27T00:00:00.000Z",
+  capacity: 8,
+  participantCount: 2
+}, metricNow), true);
+assert.equal(sessionMetricsContext.isSessionBookable({
+  status: "open",
+  startsAt: "2026-07-27T00:00:00.000Z",
+  capacity: 1,
+  participantCount: 1
+}, metricNow), false);
+assert.equal(sessionMetricsContext.countUpcomingBookings([
+  { status: "confirmed", endsAt: "2026-07-27T00:00:00.000Z" },
+  { status: "cancelled", endsAt: "2026-07-27T00:00:00.000Z" },
+  { status: "confirmed", endsAt: "2026-07-25T00:00:00.000Z" }
+], metricNow), 1);
 
 const paymentRegionStart = script.indexOf("function preferredPaymentRegion");
 const paymentRegionEnd = script.indexOf("\n\nfunction toggleTheme", paymentRegionStart);
@@ -159,8 +247,8 @@ assert.deepEqual(paymentRegionFor(["en", "zh-HK"]), { country: "HK", currency: "
 assert.deepEqual(paymentRegionFor(["zh-CN"]), { country: "CN", currency: "CNY" });
 assert.deepEqual(paymentRegionFor(["de-DE"]), { country: "DE", currency: "EUR" });
 assert.deepEqual(paymentRegionFor(["pt-BR"]), { country: "BR", currency: "USD" });
-assert.deepEqual(paymentRegionFor([]), { country: "HK", currency: "HKD" });
-assert.deepEqual(paymentRegionFor(["_"]), { country: "HK", currency: "HKD" });
+assert.deepEqual(paymentRegionFor([]), { country: "US", currency: "USD" });
+assert.deepEqual(paymentRegionFor(["_"]), { country: "US", currency: "USD" });
 
 const eligibilityStart = script.indexOf("function bookingCreditCost");
 const eligibilityEnd = script.indexOf("\n\nfunction eligibleCardForSession", eligibilityStart);

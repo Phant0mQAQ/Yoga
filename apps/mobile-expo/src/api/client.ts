@@ -7,12 +7,15 @@ import type {
   AuditLog,
   AvailabilitySession,
   Booking,
+  Home,
   LoginResponse,
   MemberCard,
   Order,
   Payment,
   PaymentMethod,
   PresignedUpload,
+  PrivacyRequest,
+  RegistrationStartResponse,
   Role,
   User
 } from "./types";
@@ -21,6 +24,7 @@ const configuredBaseUrl = Constants.expoConfig?.extra?.apiBaseUrl as string | un
 export const API_BASE_URL = resolveApiBaseUrl();
 
 let authToken: string | null = null;
+let firebaseRefreshToken: string | null = null;
 let unauthorizedHandler: (() => void | Promise<void>) | null = null;
 
 export class ApiError extends Error {
@@ -38,6 +42,10 @@ export function setAuthToken(token: string | null) {
   authToken = token;
 }
 
+export function setFirebaseRefreshToken(token: string | null) {
+  firebaseRefreshToken = token;
+}
+
 export function setUnauthorizedHandler(handler: (() => void | Promise<void>) | null) {
   unauthorizedHandler = handler;
 }
@@ -46,18 +54,50 @@ export function isUnauthorizedError(error: unknown) {
   return error instanceof ApiError && error.status === 401;
 }
 
+const authResponseSchema = z.object({
+  token: z.string(),
+  session: z.object({ activeRole: z.enum(["student", "coach", "staff", "admin"]) }),
+  user: z.object({ id: z.string(), name: z.string() })
+}).passthrough();
+
 export async function login(email: string, password: string, role: Role, locale: string) {
   const response = await request<LoginResponse>("/auth/login", {
     method: "POST",
-    body: { email, password, role, locale }
+    body: { email, password, role, locale },
+    timeoutMs: 20_000
   });
-  const schema = z.object({
-    token: z.string(),
-    session: z.object({ activeRole: z.enum(["student", "coach", "staff", "admin"]) }),
-    user: z.object({ id: z.string(), name: z.string() })
-  }).passthrough();
-  schema.parse(response);
+  authResponseSchema.parse(response);
   return response;
+}
+
+export async function register(
+  name: string,
+  email: string,
+  password: string,
+  role: Role,
+  locale: string,
+  inviteCode?: string
+) {
+  const response = await request<RegistrationStartResponse>("/auth/register", {
+    method: "POST",
+    body: { name, email, password, role, locale, ...(inviteCode ? { inviteCode } : {}) },
+    timeoutMs: 30_000
+  });
+  z.object({
+    requiresVerification: z.literal(true),
+    email: z.string().email(),
+    verificationMethod: z.enum(["link", "code"]).optional(),
+    expiresAt: z.string().optional()
+  }).parse(response);
+  return response;
+}
+
+export async function resendEmailVerification(email: string, password: string, locale: string) {
+  return request<RegistrationStartResponse>("/auth/email/resend", {
+    method: "POST",
+    body: { email, password, locale },
+    timeoutMs: 20_000
+  });
 }
 
 export async function logout() {
@@ -72,8 +112,61 @@ export async function me() {
   return request<{ user: User; activeRole: Role; sessionId: string }>("/me");
 }
 
+export async function presignAvatarUpload(body: { fileName: string; contentType: string; fileSize?: number }) {
+  return request<PresignedUpload>("/me/avatar-upload", {
+    method: "POST",
+    body
+  });
+}
+
+export async function uploadAvatarFile(upload: PresignedUpload, contentType: string, body: Blob) {
+  return uploadPresignedFile(upload, contentType, body, "Avatar");
+}
+
+export async function uploadAdminFile(upload: PresignedUpload, contentType: string, body: Blob) {
+  return uploadPresignedFile(upload, contentType, body, "Admin media");
+}
+
+async function uploadPresignedFile(upload: PresignedUpload, contentType: string, body: Blob, label: string) {
+  const headers: Record<string, string> = {
+    "Content-Type": contentType,
+    ...upload.headers
+  };
+  if (isFirstPartyUploadUrl(upload.uploadUrl) && authToken) {
+    headers.Authorization = `Bearer ${authToken}`;
+  }
+  const response = await fetch(upload.uploadUrl, {
+    method: "PUT",
+    headers,
+    body
+  });
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({})) as { error?: string; message?: string };
+    throw new ApiError(
+      failure.message ?? `${label} upload failed with status ${response.status}`,
+      response.status,
+      failure.error ?? "upload_failed"
+    );
+  }
+}
+
+export async function saveAvatar(objectKey: string) {
+  return request<User>("/me/avatar", {
+    method: "PATCH",
+    body: { objectKey }
+  });
+}
+
+function isFirstPartyUploadUrl(value: string) {
+  try {
+    return new URL(value).origin === new URL(API_BASE_URL).origin;
+  } catch {
+    return false;
+  }
+}
+
 export async function home(locale: string) {
-  return request(`/home?locale=${encodeURIComponent(locale)}`);
+  return request<Home>(`/home?locale=${encodeURIComponent(locale)}`);
 }
 
 export async function availability(locale: string) {
@@ -86,6 +179,33 @@ export async function bookings(locale: string) {
 
 export async function memberCards() {
   return request<MemberCard[]>("/member-cards");
+}
+
+export function legalUrl(page: "privacy" | "privacy-choices" | "terms") {
+  return `${API_BASE_URL.replace(/\/api\/v1\/?$/, "")}/${page}`;
+}
+
+export async function requestMembershipCancellation(cardId: string, reason = "user_request") {
+  return request(`/member-cards/${encodeURIComponent(cardId)}/cancel-request`, {
+    method: "POST",
+    body: { reason }
+  });
+}
+
+export async function createPrivacyRequest(type: PrivacyRequest["type"], details = "") {
+  return request<PrivacyRequest>("/privacy/requests", { method: "POST", body: { type, details } });
+}
+
+export async function exportPrivacyData() {
+  return request<Record<string, unknown>>("/privacy/export");
+}
+
+export async function deleteAccount() {
+  return request<{ ok: boolean; completedAt: string }>("/privacy/account-deletion", {
+    method: "POST",
+    body: firebaseRefreshToken ? { firebaseRefreshToken } : {},
+    skipUnauthorizedHandler: true
+  });
 }
 
 export async function createBooking(courseSessionId: string, paymentMode: "member_card" | "payment") {
@@ -107,8 +227,9 @@ export async function checkIn(bookingId: string, method: "manual" | "qr" = "manu
   });
 }
 
-export async function paymentMethods(country: string, currency: string) {
-  return request<PaymentMethod[]>(`/payments/methods?country=${country}&currency=${currency}`);
+export async function paymentMethods(country: string, currency: string, allSupported = false) {
+  const scope = allSupported ? "&scope=all" : "";
+  return request<PaymentMethod[]>(`/payments/methods?country=${country}&currency=${currency}${scope}`);
 }
 
 export async function createPaymentSheet(input: {
@@ -175,7 +296,7 @@ export const adminApi = {
   payments: () => request<Payment[]>("/admin/payments"),
   refund: (paymentId: string, body: unknown) => adminWrite(`/admin/payments/${paymentId}/refunds`, "POST", body),
   auditLogs: () => request<AuditLog[]>("/admin/audit-logs"),
-  presignUpload: (body: { scope: string; fileName: string; contentType?: string }) => (
+  presignUpload: (body: { scope: string; fileName: string; contentType?: string; fileSize?: number }) => (
     adminWrite<PresignedUpload>("/admin/uploads/presign", "POST", body)
   )
 };
@@ -204,10 +325,14 @@ type RequestOptions = {
   body?: unknown;
   idempotencyKey?: string;
   skipUnauthorizedHandler?: boolean;
+  timeoutMs?: number;
 };
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? 30_000);
   let response: Response;
+  let rawBody: string;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, {
       method: options.method ?? "GET",
@@ -216,18 +341,24 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
         ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...(options.idempotencyKey ? { "Idempotency-Key": options.idempotencyKey } : {})
       },
-      body: options.body ? JSON.stringify(options.body) : undefined
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: controller.signal
     });
+    rawBody = await response.text();
   } catch {
+    if (controller.signal.aborted) {
+      throw new ApiError("Request timed out", 0, "request_timeout");
+    }
     throw new ApiError("Network request failed", 0, "network_error");
+  } finally {
+    clearTimeout(timeout);
   }
-  const rawBody = await response.text();
   let data: Record<string, unknown> = {};
   if (rawBody) {
     try {
       data = JSON.parse(rawBody) as Record<string, unknown>;
     } catch {
-      data = { message: rawBody };
+      throw new ApiError("Request failed", response.status, "invalid_response");
     }
   }
   if (!response.ok) {

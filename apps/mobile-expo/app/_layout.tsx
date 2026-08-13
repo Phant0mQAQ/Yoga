@@ -1,6 +1,7 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { router, Stack, useSegments } from "expo-router";
 import { useEffect, useMemo } from "react";
+import { AppState } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import "@/i18n";
 import { isUnauthorizedError } from "@/api/client";
@@ -14,10 +15,23 @@ export default function RootLayout() {
   const queryClient = useMemo(() => new QueryClient({
     defaultOptions: {
       queries: {
-        retry: (failureCount, error) => !isUnauthorizedError(error) && failureCount < 1
+        retry: (failureCount, error) => !isUnauthorizedError(error) && failureCount < 1,
+        staleTime: 10_000,
+        refetchOnMount: "always",
+        refetchOnReconnect: "always",
+        refetchOnWindowFocus: "always"
       }
     }
   }), []);
+
+  useEffect(() => {
+    if (process.env.EXPO_OS === "web") return;
+    focusManager.setFocused(AppState.currentState === "active");
+    const subscription = AppState.addEventListener("change", (status) => {
+      focusManager.setFocused(status === "active");
+    });
+    return () => subscription.remove();
+  }, []);
 
   return (
     <SafeAreaProvider>

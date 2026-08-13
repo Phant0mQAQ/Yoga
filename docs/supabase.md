@@ -8,7 +8,7 @@ keeping the existing domain layer and API contract unchanged.
 Open the Supabase SQL editor and run:
 
 ```text
-supabase/migrations/202606090001_yomi_app_state.sql
+supabase/migrations/202606090001_good_vibe_app_state.sql
 ```
 
 The table has Row Level Security enabled and grants no access to `anon` or

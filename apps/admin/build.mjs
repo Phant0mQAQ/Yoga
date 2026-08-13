@@ -4,12 +4,12 @@ import { fileURLToPath } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const outputDir = path.join(root, "dist");
-const apiBaseUrl = (process.env.GOOD_VIBE_API_BASE_URL ?? process.env.YOMI_API_BASE_URL)
+const apiBaseUrl = process.env.GOOD_VIBE_API_BASE_URL
   ?.trim()
   .replace(/\/+$/, "");
 
 if (!apiBaseUrl || !apiBaseUrl.startsWith("https://") || !apiBaseUrl.endsWith("/api/v1")) {
-  throw new Error("GOOD_VIBE_API_BASE_URL must be an HTTPS URL ending in /api/v1 (legacy YOMI_API_BASE_URL is also supported)");
+  throw new Error("GOOD_VIBE_API_BASE_URL must be an HTTPS URL ending in /api/v1");
 }
 
 fs.rmSync(outputDir, { recursive: true, force: true });
@@ -25,7 +25,7 @@ const config = {
 };
 fs.writeFileSync(
   path.join(outputDir, "config.js"),
-  `window.GOOD_VIBE_CONFIG = Object.freeze(${JSON.stringify(config)});\nwindow.YOMI_CONFIG = window.GOOD_VIBE_CONFIG;\n`,
+  `window.GOOD_VIBE_CONFIG = Object.freeze(${JSON.stringify(config)});\n`,
   "utf8"
 );
 

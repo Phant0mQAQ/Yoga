@@ -1,0 +1,62 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "good-vibe-pilates-yoga",
+  "main": "./deploy/cloudflare/worker.js",
+  "build": {
+    "command": "npm run build:cloudflare"
+  },
+  "workers_dev": true,
+  "preview_urls": false,
+  "compatibility_date": "2026-07-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "define": {
+    "process.env.NODE_ENV": "\"development\""
+  },
+  "vars": {
+    "APP_BASE_URL": "https://good-vibe-pilates-yoga.2316196563.workers.dev",
+    "CORS_ALLOWED_ORIGINS": "https://good-vibe-pilates-yoga.2316196563.workers.dev",
+    "AUTH_PROVIDER": "local",
+    "FIREBASE_REQUEST_TIMEOUT_MS": "10000",
+    "LEGAL_OPERATOR_NAME": "Good Vibe Pilates & Yoga",
+    "LEGAL_POSTAL_ADDRESS": "California, United States",
+    "PRIVACY_EMAIL": "privacy@goodvibepilatesyoga.com",
+    "SUPPORT_EMAIL": "support@goodvibepilatesyoga.com",
+    "LEGAL_EFFECTIVE_DATE": "July 16, 2026"
+  },
+  "assets": {
+    "directory": "./.cloudflare/public",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "run_worker_first": [
+      "/",
+      "/admin",
+      "/admin/*",
+      "/app",
+      "/health",
+      "/api/*",
+      "/payments/*",
+      "/privacy",
+      "/privacy-choices",
+      "/terms",
+      "/support",
+      "/mock-upload/*",
+      "/assets/*"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "good-vibe-pilates-yoga",
+      "database_id": "fb518efb-128d-4edc-9e66-5338b897153b"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MEDIA",
+      "bucket_name": "good-vibe-avatar-assets"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

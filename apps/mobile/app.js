@@ -1,4 +1,6 @@
 const THEME_STORAGE_KEY = "good-vibe-mobile-theme";
+const DATA_REFRESH_INTERVAL_MS = 60_000;
+let dataRefreshPromise = null;
 
 const state = {
   token: localStorage.getItem("token") || "",
@@ -9,6 +11,7 @@ const state = {
   user: null,
   tab: "home",
   busy: false,
+  avatarBusy: false,
   status: "",
   dataLoadFailed: false,
   pendingBookings: new Set(),
@@ -21,12 +24,16 @@ const messages = {
     language: "Language", darkMode: "Dark mode", lightMode: "Light mode",
     student: "Student", coach: "Coach", staff: "Staff", staffSignIn: "Studio operations",
     email: "Email", password: "Password", signIn: "Sign in",
-    logout: "Sign out", home: "Discover", bookings: "Bookings", profile: "Profile",
-    classes: "Upcoming classes", book: "Reserve class", remaining: "Credits left",
+    logout: "Sign out", home: "Discover", bookings: "Bookings", profile: "Profile", privacy: "Privacy Policy", privacyChoices: "California Privacy Choices", terms: "Membership & Booking Terms", cancelMembership: "Cancel membership", deleteAccount: "Delete account", cancelMembershipConfirm: "Submit a membership cancellation request and stop auto-renewal?", deleteAccountConfirm: "Permanently delete your account and eligible personal data?", requestSubmitted: "Request submitted.",
+    changeProfilePhoto: "Change profile photo", uploadingProfilePhoto: "Uploading photo...", avatarUpdated: "Profile photo updated.", avatarTooLarge: "Profile photos must be 10 MB or smaller.", invalidAvatarType: "Choose a JPEG, PNG, WebP, HEIC, or HEIF image.",
+    classes: "Upcoming classes", book: "Book", remaining: "Credits left",
+    courseCatalog: "Course catalog", courseCatalogMeta: "All active studio courses", noUpcomingSession: "No upcoming session scheduled",
+    studioUpdates: "Studio updates", studioUpdatesMeta: "Latest guidance and highlights", studioShop: "Studio shop", studioShopMeta: "Products currently available",
+    minutes: "min", capacity: "spots", stock: "in stock",
     memberCard: "Studio Pass", paymentMethods: "Payment methods", checkIn: "Check in",
     noData: "Nothing here yet", greeting: "Good morning", joining: "joining",
     tagline: "Move well. Feel present.", intro: "A calmer way to book classes, meet your coach, and manage the studio.",
-    continueAs: "Continue as", classSocialMeta: "See who is joining before you book", paymentRegion: "Available for your region",
+    continueAs: "Continue as", classSocialMeta: "See who is joining before you book", paymentRegion: "All supported payment options",
     demoPassword: "Demo password", weekStreak: "4 week streak", yogi: "Yogi",
     todayAtGoodVibe: "Today at Good Vibe", teachingDay: "Your teaching day.", sessions: "Sessions",
     confirmed: "Confirmed", arrived: "Arrived", frontDesk: "FRONT DESK", readyForArrivals: "Ready for arrivals",
@@ -38,7 +45,7 @@ const messages = {
     reserving: "Reserving...", checkingIn: "Checking in...", bookingConfirmed: "Class reserved.", checkInComplete: "Check-in complete.",
     alreadyBooked: "You already have an active booking for this class.", sessionClosed: "This class is no longer open.",
     checkInNotEligible: "This booking cannot be checked in.", requestFailed: "Request failed. Please try again.", signingIn: "Signing in...",
-    retry: "Retry", dataLoadFailed: "Some studio data could not be loaded. Your previous data was kept."
+    retry: "Retry", refresh: "Refresh", dataLoadFailed: "Some studio data could not be loaded. Your previous data was kept."
   },
   "zh-Hans": {
     language: "\u8bed\u8a00", darkMode: "\u6df1\u8272\u6a21\u5f0f", lightMode: "\u6d45\u8272\u6a21\u5f0f",
@@ -51,17 +58,21 @@ const messages = {
     checkedIn: "\u5df2\u6838\u9500", cancelled: "\u5df2\u53d6\u6d88", pendingPayment: "\u5f85\u652f\u4ed8", waitlisted: "\u5df2\u5019\u8865",
     student: "学员", coach: "教练", staff: "员工", staffSignIn: "场馆运营",
     email: "邮箱", password: "密码", signIn: "登录",
-    logout: "退出登录", home: "发现", bookings: "预约", profile: "我的",
+    logout: "退出登录", home: "发现", bookings: "预约", profile: "我的", privacy: "隐私政策", privacyChoices: "加州隐私选择", terms: "会员与预约条款", cancelMembership: "取消会员", deleteAccount: "删除账户", cancelMembershipConfirm: "提交会员取消申请并停止自动续费？", deleteAccountConfirm: "永久删除账户及可删除的个人数据？", requestSubmitted: "申请已提交。",
+    changeProfilePhoto: "更换头像", uploadingProfilePhoto: "正在上传头像…", avatarUpdated: "头像已更新。", avatarTooLarge: "头像图片不能超过 10 MB。", invalidAvatarType: "请选择 JPEG、PNG、WebP、HEIC 或 HEIF 图片。",
     classes: "近期课程", book: "预约课程", remaining: "剩余课次",
+    courseCatalog: "课程目录", courseCatalogMeta: "全部已启用场馆课程", noUpcomingSession: "暂无未来排课",
+    studioUpdates: "场馆动态", studioUpdatesMeta: "最新内容与练习建议", studioShop: "场馆商城", studioShopMeta: "场馆当前在售商品",
+    minutes: "分钟", capacity: "个名额", stock: "件库存",
     memberCard: "场馆会员卡", paymentMethods: "支付方式", checkIn: "到店核销",
     noData: "暂无数据", greeting: "早上好", joining: "人已预约",
     tagline: "自在流动，专注当下。", intro: "更从容地预约课程、认识教练，并管理你的瑜伽生活。",
-    continueAs: "选择身份", classSocialMeta: "预约前查看谁会一起上课", paymentRegion: "当前地区可用",
+    continueAs: "选择身份", classSocialMeta: "预约前查看谁会一起上课", paymentRegion: "全部支持的支付方式",
     classFull: "课程已满", noEligibleCard: "没有有效且未过期、课次足够的会员卡可用于该课程。",
     reserving: "正在预约...", checkingIn: "正在核销...", bookingConfirmed: "课程预约成功。", checkInComplete: "核销完成。",
     alreadyBooked: "你已预约该课程。", sessionClosed: "该课程已停止预约。",
     checkInNotEligible: "该预约当前无法核销。", requestFailed: "请求失败，请重试。", signingIn: "正在登录...",
-    retry: "重试", dataLoadFailed: "部分场馆数据加载失败，已保留此前的数据。"
+    retry: "重试", refresh: "刷新", dataLoadFailed: "部分场馆数据加载失败，已保留此前的数据。"
   },
   ko: {
     language: "\uc5b8\uc5b4", darkMode: "\ub2e4\ud06c \ubaa8\ub4dc", lightMode: "\ub77c\uc774\ud2b8 \ubaa8\ub4dc",
@@ -74,17 +85,21 @@ const messages = {
     checkedIn: "\uccb4\ud06c\uc778 \uc644\ub8cc", cancelled: "\ucde8\uc18c", pendingPayment: "\uacb0\uc81c \ub300\uae30", waitlisted: "\ub300\uae30 \ub4f1\ub85d",
     student: "회원", coach: "강사", staff: "직원", staffSignIn: "스튜디오 운영",
     email: "이메일", password: "비밀번호", signIn: "로그인",
-    logout: "로그아웃", home: "둘러보기", bookings: "예약", profile: "내 정보",
+    logout: "로그아웃", home: "둘러보기", bookings: "예약", profile: "내 정보", privacy: "개인정보 처리방침", privacyChoices: "캘리포니아 개인정보 선택", terms: "멤버십 및 예약 약관", cancelMembership: "멤버십 취소", deleteAccount: "계정 삭제", cancelMembershipConfirm: "멤버십 취소 요청을 제출하고 자동 갱신을 중지할까요?", deleteAccountConfirm: "계정과 삭제 가능한 개인정보를 영구 삭제할까요?", requestSubmitted: "요청이 제출되었습니다.",
+    changeProfilePhoto: "프로필 사진 변경", uploadingProfilePhoto: "사진 업로드 중…", avatarUpdated: "프로필 사진이 업데이트되었습니다.", avatarTooLarge: "프로필 사진은 10MB 이하여야 합니다.", invalidAvatarType: "JPEG, PNG, WebP, HEIC 또는 HEIF 이미지를 선택하세요.",
     classes: "다가오는 수업", book: "수업 예약", remaining: "남은 횟수",
+    courseCatalog: "수업 카탈로그", courseCatalogMeta: "모든 활성 스튜디오 수업", noUpcomingSession: "예정된 수업이 없습니다",
+    studioUpdates: "스튜디오 소식", studioUpdatesMeta: "최신 안내와 하이라이트", studioShop: "스튜디오 샵", studioShopMeta: "현재 구매 가능한 상품",
+    minutes: "분", capacity: "명", stock: "개 재고",
     memberCard: "스튜디오 패스", paymentMethods: "결제 수단", checkIn: "체크인",
     noData: "아직 데이터가 없습니다", greeting: "좋은 아침이에요", joining: "명 참여",
     tagline: "잘 움직이고, 지금에 머물다.", intro: "수업 예약부터 강사와의 연결, 스튜디오 관리까지 더 차분하게.",
-    continueAs: "역할 선택", classSocialMeta: "예약 전에 함께 참여하는 회원을 확인하세요", paymentRegion: "현재 지역에서 사용 가능",
+    continueAs: "역할 선택", classSocialMeta: "예약 전에 함께 참여하는 회원을 확인하세요", paymentRegion: "지원되는 모든 결제 수단",
     classFull: "정원 마감", noEligibleCard: "이 수업에 필요한 횟수가 남은 유효한 회원권이 없습니다.",
     reserving: "예약 중...", checkingIn: "체크인 중...", bookingConfirmed: "수업 예약이 완료되었습니다.", checkInComplete: "체크인이 완료되었습니다.",
     alreadyBooked: "이미 이 수업을 예약했습니다.", sessionClosed: "이 수업은 더 이상 예약할 수 없습니다.",
     checkInNotEligible: "이 예약은 체크인할 수 없습니다.", requestFailed: "요청에 실패했습니다. 다시 시도하세요.", signingIn: "로그인 중...",
-    retry: "다시 시도", dataLoadFailed: "일부 스튜디오 데이터를 불러오지 못해 이전 데이터를 유지했습니다."
+    retry: "다시 시도", refresh: "새로고침", dataLoadFailed: "일부 스튜디오 데이터를 불러오지 못해 이전 데이터를 유지했습니다."
   }
 };
 
@@ -93,6 +108,13 @@ const copy = (key) => messages[state.locale]?.[key] || messages.en[key] || key;
 
 applyTheme();
 boot();
+window.addEventListener("focus", () => void refreshDataSilently());
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) void refreshDataSilently();
+});
+window.setInterval(() => {
+  if (!document.hidden) void refreshDataSilently();
+}, DATA_REFRESH_INTERVAL_MS);
 
 async function boot() {
   if (state.token) {
@@ -153,9 +175,9 @@ function loginScreen() {
       <button class="operations-link" id="staffRole">${copy("staffSignIn")}</button>
       <div class="form-stack">
         <input id="email" type="email" autocomplete="username" aria-label="${escapeHtml(copy("email"))}" placeholder="${escapeHtml(copy("email"))}" value="${defaultEmail(state.role)}">
-        <input id="password" type="password" autocomplete="current-password" aria-label="${escapeHtml(copy("password"))}" placeholder="${escapeHtml(copy("password"))}" value="Yomi@2026">
+        <input id="password" type="password" autocomplete="current-password" aria-label="${escapeHtml(copy("password"))}" placeholder="${escapeHtml(copy("password"))}" value="GoodVibe@2026">
         <button class="primary" id="login" ${state.busy ? "disabled" : ""}>${copy(state.busy ? "signingIn" : "signIn")}</button>
-        <p class="muted">${copy("demoPassword")}: Yomi@2026</p>
+        <p class="muted">${copy("demoPassword")}: GoodVibe@2026</p>
       </div>
       ${state.status ? `<p class="notice" role="alert" aria-live="assertive">${escapeHtml(state.status)}</p>` : ""}
     </section>
@@ -166,7 +188,10 @@ function appShell() {
   return `
     ${brandHeader(roleLabel())}
     ${state.status ? `<p class="notice app-notice" role="status" aria-live="polite">${escapeHtml(state.status)}</p>` : ""}
-    ${state.dataLoadFailed ? `<button class="secondary retry-load" id="retryLoad" ${state.busy ? "disabled" : ""}>${escapeHtml(copy(state.busy ? "reserving" : "retry"))}</button>` : ""}
+    <div class="sync-actions">
+      <button class="secondary retry-load" id="refreshData" ${state.busy ? "disabled" : ""}>${escapeHtml(copy("refresh"))}</button>
+      ${state.dataLoadFailed ? `<button class="secondary retry-load" id="retryLoad" ${state.busy ? "disabled" : ""}>${escapeHtml(copy(state.busy ? "reserving" : "retry"))}</button>` : ""}
+    </div>
     ${contentForRole()}
     <nav class="bottom-nav">
       ${tabButton("home", copy("home"))}
@@ -186,6 +211,10 @@ function studentContent() {
   if (state.tab === "bookings") return bookingContent(false);
   if (state.tab === "profile") return profileContent();
   const card = bestUsableCard();
+  const home = state.data.home ?? {};
+  const courses = home.recommendedCourses ?? [];
+  const studioContent = [...(home.banners ?? []), ...(home.features ?? []), ...(home.knowledge ?? [])];
+  const products = home.storeRecommendations ?? [];
   return `
     <section class="welcome">
       <div><p class="muted">${copy("greeting")},</p><h1>${escapeHtml(state.user?.name || copy("yogi"))}</h1></div>
@@ -193,14 +222,22 @@ function studentContent() {
     </section>
     <section class="metrics">
       ${metric(card?.remainingCredits ?? 0, copy("remaining"))}
-      ${metric(state.data.availability.length, copy("classes"))}
-      ${metric(state.data.bookings.length, copy("bookings"))}
+      ${metric(state.data.availability.filter(isSessionBookable).length, copy("classes"))}
+      ${metric(countUpcomingBookings(state.data.bookings), copy("bookings"))}
     </section>
     ${card ? membershipCard(card) : ""}
     <div class="section-head"><div><h2>${copy("classes")}</h2><p class="muted">${copy("classSocialMeta")}</p></div></div>
     <section class="list">${state.data.availability.map(sessionCard).join("") || empty()}</section>
-    <div class="section-head"><div><h2>${copy("paymentMethods")}</h2><p class="muted">${copy("paymentRegion")}</p></div></div>
-    <section class="method-grid">${state.data.paymentMethods.map(paymentMethod).join("")}</section>
+    <div class="section-head"><div><h2>${copy("courseCatalog")}</h2><p class="muted">${copy("courseCatalogMeta")}</p></div></div>
+    <section class="catalog-grid">${courses.map(courseCatalogCard).join("") || empty()}</section>
+    ${studioContent.length ? `
+      <div class="section-head"><div><h2>${copy("studioUpdates")}</h2><p class="muted">${copy("studioUpdatesMeta")}</p></div></div>
+      <section class="editorial-list">${studioContent.map(contentCard).join("")}</section>
+    ` : ""}
+    ${products.length ? `
+      <div class="section-head"><div><h2>${copy("studioShop")}</h2><p class="muted">${copy("studioShopMeta")}</p></div></div>
+      <section class="catalog-grid">${products.map(productCard).join("")}</section>
+    ` : ""}
   `;
 }
 
@@ -231,14 +268,47 @@ function staffContent() {
 }
 
 function profileContent() {
+  const cancellableCard = state.data.cards.find((card) => ["active", "frozen"].includes(card.status));
+  const avatarUrl = safeHttpImageUrl(state.user?.avatarUrl);
+  const initials = profileInitials(state.user?.name);
   return `
     <section class="profile-card">
-      <div class="item-row"><div><p class="section-label">${copy("account")}</p><h2>${escapeHtml(state.user?.name || "")}</h2></div><span class="pill">${roleLabel()}</span></div>
-      <p class="muted">${escapeHtml(state.user?.email || state.user?.phone || "")}</p>
+      <div class="profile-identity">
+        <label class="profile-avatar-control ${state.avatarBusy ? "is-busy" : ""}" for="avatarFile" aria-label="${escapeHtml(copy("changeProfilePhoto"))}">
+          <span class="profile-avatar" style="background:${escapeHtml(avatarColorForUser(state.user?.id))}">
+            <span aria-hidden="true">${escapeHtml(initials)}</span>
+            ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="" onerror="this.remove()">` : ""}
+          </span>
+          <span class="profile-avatar-action">${escapeHtml(copy(state.avatarBusy ? "uploadingProfilePhoto" : "changeProfilePhoto"))}</span>
+        </label>
+        <input id="avatarFile" class="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" ${state.avatarBusy ? "disabled" : ""}>
+        <div class="profile-copy">
+          <div class="item-row"><div><p class="section-label">${copy("account")}</p><h2>${escapeHtml(state.user?.name || "")}</h2></div><span class="pill">${roleLabel()}</span></div>
+          <p class="muted">${escapeHtml(state.user?.email || state.user?.phone || "")}</p>
+        </div>
+      </div>
     </section>
     <div class="section-head"><h2>${copy("memberCard")}</h2></div>
     <section class="list">${state.data.cards.map(membershipCard).join("") || empty()}</section>
-    <section class="profile-card" style="margin-top:12px"><button class="secondary" id="logout">${copy("logout")}</button></section>
+    ${state.role === "student" ? `
+      <details class="payment-disclosure">
+        <summary>
+          <span><strong>${copy("paymentMethods")}</strong><small>${copy("paymentRegion")}</small></span>
+          <span class="disclosure-chevron" aria-hidden="true">⌄</span>
+        </summary>
+        <div class="payment-disclosure-body">
+          <section class="method-grid">${paymentMethodsForDisplay(state.data.paymentMethods).map(paymentMethod).join("")}</section>
+        </div>
+      </details>
+    ` : ""}
+    <section class="profile-card" style="margin-top:12px">
+      <p><a href="/privacy" target="_blank" rel="noopener">${copy("privacy")}</a></p>
+      <p><a href="/privacy-choices" target="_blank" rel="noopener">${copy("privacyChoices")}</a></p>
+      <p><a href="/terms" target="_blank" rel="noopener">${copy("terms")}</a></p>
+      ${cancellableCard ? `<button class="secondary" id="cancelMembership" data-card-id="${escapeHtml(cancellableCard.id)}">${copy("cancelMembership")}</button>` : ""}
+      <button class="secondary" id="deleteAccount">${copy("deleteAccount")}</button>
+      <button class="secondary" id="logout">${copy("logout")}</button>
+    </section>
   `;
 }
 
@@ -278,8 +348,28 @@ function bestUsableCard() {
 }
 
 function isSessionFull(session) {
-  const booked = session.participantCount ?? session.participants?.length ?? session.bookedCount ?? 0;
+  const booked = reservationCount(session);
   return booked >= Number(session.capacity || 0);
+}
+
+function reservationCount(session) {
+  return Number(session.participantCount ?? session.participants?.length ?? session.bookedCount ?? 0);
+}
+
+function isSessionBookable(session, now = Date.now()) {
+  const startsAt = new Date(session.startsAt).getTime();
+  return session.status === "open"
+    && Number.isFinite(startsAt)
+    && startsAt > now
+    && !isSessionFull(session);
+}
+
+function countUpcomingBookings(bookings, now = Date.now()) {
+  return bookings.filter((booking) => {
+    if (booking.status === "cancelled") return false;
+    const endsAt = new Date(booking.endsAt ?? booking.startsAt).getTime();
+    return Number.isFinite(endsAt) && endsAt > now;
+  }).length;
 }
 
 function hasActiveBookingForSession(sessionId) {
@@ -287,7 +377,7 @@ function hasActiveBookingForSession(sessionId) {
 }
 
 function sessionCard(session, index) {
-  const booked = session.participantCount ?? session.participants?.length ?? session.bookedCount ?? 0;
+  const booked = reservationCount(session);
   const remaining = Math.max(0, session.capacity - booked);
   const full = isSessionFull(session);
   const hasEligibleCard = Boolean(eligibleCardForSession(session));
@@ -300,6 +390,7 @@ function sessionCard(session, index) {
     <article class="class-card ${index === 0 ? "featured" : ""}">
       <div class="date-rail"><span>${weekday(session.startsAt)}</span><strong>${dayNumber(session.startsAt)}</strong></div>
       <div class="class-body">
+        ${courseImageMarkup(session.course)}
         <div class="class-head">
           <div class="class-copy"><h3>${escapeHtml(session.course?.title || session.courseId)}</h3><p class="class-meta">${formatTimeRange(session.startsAt, session.endsAt)} &middot; ${escapeHtml(session.coach?.name || session.coachId)}</p></div>
           <span class="pill">${full ? copy("classFull") : `${remaining} ${copy("left")}`}</span>
@@ -312,14 +403,106 @@ function sessionCard(session, index) {
   `;
 }
 
+function courseImageMarkup(course) {
+  const imageUrl = safeHttpImageUrl(course?.imageUrl);
+  if (!imageUrl) return "";
+  return `<img class="course-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(course?.title || copy("classes"))}" loading="lazy">`;
+}
+
+function safeHttpImageUrl(value) {
+  const candidate = String(value ?? "").trim();
+  if (!candidate) return "";
+  try {
+    const url = new URL(candidate, window.location.origin);
+    return ["http:", "https:"].includes(url.protocol) ? url.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function courseCatalogCard(course) {
+  const nextSession = state.data.availability.find((session) => session.courseId === course.id);
+  const imageUrl = safeHttpImageUrl(course.imageUrl);
+  return `
+    <article class="catalog-card">
+      ${imageUrl
+        ? `<img class="catalog-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(course.title || course.id)}" loading="lazy">`
+        : `<div class="catalog-placeholder" aria-hidden="true">&#9752;</div>`}
+      <div class="catalog-body">
+        <h3>${escapeHtml(course.title || course.id)}</h3>
+        <p class="catalog-description">${escapeHtml(course.description || "")}</p>
+        <p class="catalog-meta">${escapeHtml(course.durationMinutes ?? 0)} ${copy("minutes")} &middot; ${escapeHtml(course.capacity ?? 0)} ${copy("capacity")}</p>
+        <p class="catalog-schedule">${nextSession ? formatDate(nextSession.startsAt) : copy("noUpcomingSession")}</p>
+      </div>
+    </article>
+  `;
+}
+
+function contentCard(block) {
+  const imageUrl = safeHttpImageUrl(block.imageUrl);
+  return `
+    <article class="editorial-card">
+      ${imageUrl ? `<img class="editorial-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(block.title || block.id)}" loading="lazy">` : ""}
+      <div class="editorial-body">
+        <p class="editorial-type">${escapeHtml(block.type || "")}</p>
+        <h3>${escapeHtml(block.title || block.id)}</h3>
+        <p class="catalog-description">${escapeHtml(block.description || "")}</p>
+      </div>
+    </article>
+  `;
+}
+
+function productCard(product) {
+  const imageUrl = safeHttpImageUrl(product.imageUrl);
+  return `
+    <article class="catalog-card">
+      ${imageUrl
+        ? `<img class="catalog-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.title || product.id)}" loading="lazy">`
+        : `<div class="catalog-placeholder" aria-hidden="true">&#9783;</div>`}
+      <div class="catalog-body">
+        <h3>${escapeHtml(product.title || product.id)}</h3>
+        <p class="catalog-description">${escapeHtml(product.description || "")}</p>
+        <div class="product-footer">
+          <strong>${escapeHtml(formatAmount(product.priceAmount, product.currency))}</strong>
+          <span class="pill">${escapeHtml(product.stock ?? 0)} ${copy("stock")}</span>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 function attendeeStrip(session, booked) {
   const participants = (session.participants || []).slice(0, 6);
   return `
     <div class="attendees">
-      ${participants.map((person) => `<span class="avatar" title="${escapeHtml(person.name)}" style="background:${escapeHtml(person.color || "#6f8877")}">${escapeHtml(person.initials || "?")}</span>`).join("")}
+      ${participants.map(attendeeAvatar).join("")}
       <span class="joining">${booked} ${copy("joining")}</span>
     </div>
   `;
+}
+
+function attendeeAvatar(person) {
+  const avatarUrl = safeHttpImageUrl(person?.avatarUrl);
+  return `<span class="avatar" role="img" aria-label="${escapeHtml(person?.name || copy("yogi"))}" title="${escapeHtml(person?.name || "")}" style="background:${escapeHtml(person?.color || "#6f8877")}">
+    <span aria-hidden="true">${escapeHtml(person?.initials || "?")}</span>
+    ${avatarUrl ? `<img src="${escapeHtml(avatarUrl)}" alt="" loading="lazy" onerror="this.remove()">` : ""}
+  </span>`;
+}
+
+function profileInitials(name) {
+  return String(name || copy("yogi"))
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0] || "")
+    .join("")
+    .toUpperCase() || "?";
+}
+
+function avatarColorForUser(value) {
+  const palette = ["#526f5d", "#8a6158", "#68748d", "#7a6b4f", "#6f5f82"];
+  const hash = Array.from(String(value || "")).reduce((total, character) => total + character.charCodeAt(0), 0);
+  return palette[hash % palette.length];
 }
 
 function bookingContent(canCheckIn) {
@@ -346,7 +529,70 @@ function bookingListMarkup(canCheckIn) {
 }
 
 function paymentMethod(method) {
-  return `<article class="method"><strong>${escapeHtml(method.display?.[state.locale] || method.display?.en || method.code)}</strong><small>${escapeHtml(method.code)}</small></article>`;
+  const isInternationalCard = method.code === "card";
+  const title = escapeHtml(method.display?.[state.locale] || method.display?.en || method.code);
+  return `
+    <article class="method${isInternationalCard ? " method-international-card" : ""}">
+      <div class="method-heading">
+        ${paymentMethodIcon(method.code)}
+        <strong>${title}</strong>
+      </div>
+      ${isInternationalCard ? cardNetworkLogos() : ""}
+    </article>
+  `;
+}
+
+function paymentMethodsForDisplay(methods) {
+  const walletCapabilities = [
+    {
+      code: "apple_pay",
+      family: "wallet",
+      display: { en: "Apple Pay", "zh-Hans": "Apple Pay", ko: "Apple Pay" }
+    },
+    {
+      code: "google_pay",
+      family: "wallet",
+      display: { en: "Google Pay", "zh-Hans": "Google Pay", ko: "Google Pay" }
+    }
+  ].filter((capability) => !methods.some((method) => method.code === capability.code));
+  const result = [...methods];
+  const cardIndex = methods.findIndex((method) => method.code === "card");
+  result.splice(cardIndex < 0 ? 0 : cardIndex + 1, 0, ...walletCapabilities);
+  return result;
+}
+
+function paymentMethodIcon(code) {
+  const assetByCode = {
+    card: "card.svg",
+    apple_pay: "apple-pay.svg",
+    google_pay: "google-pay.svg",
+    paypal: "paypal.svg",
+    alipay: "alipay.svg",
+    wechat_pay: "wechat-pay.svg",
+    kakao_pay: "kakao-pay.svg",
+    naver_pay: "naver-pay.svg",
+    samsung_pay: "samsung-pay.svg",
+    payco: "payco.png"
+  };
+  const asset = assetByCode[code] || assetByCode.card;
+  return `<span class="payment-logo" aria-hidden="true"><img src="/app/assets/payment/${asset}" alt=""></span>`;
+}
+
+function cardNetworkLogos() {
+  const networks = [
+    ["Visa", "visa.svg"],
+    ["Mastercard", "mastercard.svg"],
+    ["American Express", "american-express.svg"],
+    ["Discover", "discover.svg"],
+    ["JCB", "jcb.svg"],
+    ["Diners Club", "diners-club.svg"],
+    ["UnionPay", "unionpay.svg"]
+  ];
+  return `
+    <div class="card-networks" aria-label="Visa, Mastercard, American Express, Discover, JCB, Diners Club, and UnionPay">
+      ${networks.map(([name, asset]) => `<span class="card-network" title="${name}"><img src="/app/assets/payment/${asset}" alt="${name}"></span>`).join("")}
+    </div>
+  `;
 }
 
 function bind() {
@@ -375,7 +621,11 @@ function bind() {
   });
   $("#login")?.addEventListener("click", login);
   $("#logout")?.addEventListener("click", logout);
+  $("#cancelMembership")?.addEventListener("click", requestMembershipCancellation);
+  $("#deleteAccount")?.addEventListener("click", deleteAccount);
+  $("#avatarFile")?.addEventListener("change", (event) => uploadProfilePhoto(event.target.files?.[0]));
   $("#retryLoad")?.addEventListener("click", retryDataLoad);
+  $("#refreshData")?.addEventListener("click", retryDataLoad);
   document.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => {
     state.tab = button.dataset.tab;
     render();
@@ -414,6 +664,86 @@ async function login() {
 
 async function logout() {
   try { await api("/auth/logout", { method: "POST" }); } finally { clearSession(); render(); }
+}
+
+async function uploadProfilePhoto(file) {
+  if (!file || state.avatarBusy) return;
+  const allowedTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+  if (!allowedTypes.has(file.type)) {
+    state.status = copy("invalidAvatarType");
+    render();
+    return;
+  }
+  if (file.size > 10_000_000) {
+    state.status = copy("avatarTooLarge");
+    render();
+    return;
+  }
+
+  state.avatarBusy = true;
+  state.status = "";
+  render();
+  try {
+    const upload = await api("/me/avatar-upload", {
+      method: "POST",
+      body: { fileName: file.name, contentType: file.type, fileSize: file.size }
+    });
+    const uploadUrl = new URL(upload.uploadUrl, window.location.origin);
+    const uploadHeaders = {
+      ...(upload.headers || {}),
+      "Content-Type": file.type
+    };
+    if (uploadUrl.origin === window.location.origin) {
+      uploadHeaders.Authorization = `Bearer ${state.token}`;
+    }
+    const uploadResponse = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: uploadHeaders,
+      body: file
+    });
+    if (!uploadResponse.ok) {
+      const failure = await uploadResponse.json().catch(() => ({}));
+      const error = new Error(failure.message || failure.error || copy("requestFailed"));
+      error.status = uploadResponse.status;
+      error.code = failure.error || "upload_failed";
+      throw error;
+    }
+    state.user = await api("/me/avatar", {
+      method: "PATCH",
+      body: { objectKey: upload.objectKey }
+    });
+    state.status = copy("avatarUpdated");
+  } catch (error) {
+    state.status = localizePwaError(error);
+  } finally {
+    state.avatarBusy = false;
+    render();
+  }
+}
+
+async function requestMembershipCancellation(event) {
+  const cardId = event.currentTarget.dataset.cardId;
+  if (!cardId || !window.confirm(copy("cancelMembershipConfirm"))) return;
+  try {
+    await api(`/member-cards/${encodeURIComponent(cardId)}/cancel-request`, { method: "POST", body: { reason: "user_request" } });
+    state.status = copy("requestSubmitted");
+    await loadData();
+    render();
+  } catch (error) {
+    state.status = localizePwaError(error);
+    render();
+  }
+}
+
+async function deleteAccount() {
+  if (!window.confirm(copy("deleteAccountConfirm"))) return;
+  try {
+    await api("/privacy/account-deletion", { method: "POST" });
+    clearSession();
+  } catch (error) {
+    state.status = localizePwaError(error);
+  }
+  render();
 }
 
 async function createBooking(sessionId) {
@@ -488,16 +818,33 @@ async function checkIn(bookingId) {
 }
 
 async function loadData() {
-  const { country, currency } = state.paymentRegion;
   const [home, availability, bookings, cards, paymentMethods] = await Promise.all([
     api(`/home?locale=${state.locale}`),
     api(`/availability?locale=${state.locale}`),
     api(`/bookings?locale=${state.locale}`),
     api("/member-cards"),
-    api(`/payments/methods?country=${encodeURIComponent(country)}&currency=${encodeURIComponent(currency)}`)
+    api("/payments/methods?scope=all")
   ]);
   state.data = { home, availability, bookings, cards, paymentMethods };
   state.dataLoadFailed = false;
+}
+
+async function refreshDataSilently() {
+  if (!state.token || state.busy || dataRefreshPromise) return dataRefreshPromise;
+  dataRefreshPromise = loadData()
+    .then(() => {
+      state.status = "";
+      render();
+    })
+    .catch((error) => {
+      state.dataLoadFailed = true;
+      state.status = `${copy("dataLoadFailed")} ${localizePwaError(error)}`;
+      render();
+    })
+    .finally(() => {
+      dataRefreshPromise = null;
+    });
+  return dataRefreshPromise;
 }
 
 async function retryDataLoad() {
@@ -534,7 +881,15 @@ async function api(path, options = {}) {
     error.code = "network_error";
     throw error;
   }
-  const data = await response.json().catch(() => ({}));
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    const error = new Error(copy("requestFailed"));
+    error.status = response.status;
+    error.code = "invalid_response";
+    throw error;
+  }
   if (!response.ok) {
     const error = new Error(data.message || data.error || copy("requestFailed"));
     error.status = response.status;
@@ -552,6 +907,8 @@ function localizePwaError(error) {
     duplicate_booking: "alreadyBooked",
     session_closed: "sessionClosed",
     not_checkin_eligible: "checkInNotEligible",
+    invalid_avatar_type: "invalidAvatarType",
+    avatar_too_large: "avatarTooLarge",
     network_error: "requestFailed"
   }[error?.code];
   return key ? copy(key) : error?.message || copy("requestFailed");
@@ -561,6 +918,7 @@ function clearSession() {
   state.token = "";
   state.user = null;
   state.role = "student";
+  state.avatarBusy = false;
   state.status = "";
   state.dataLoadFailed = false;
   state.pendingBookings.clear();
@@ -667,7 +1025,7 @@ function paymentRegionForLocales(localeValues) {
     }
   }
 
-  if (!inferredCountry) return { country: "HK", currency: "HKD" };
+  if (!inferredCountry) return { country: "US", currency: "USD" };
   return {
     country: inferredCountry,
     currency: currencyByRegion[inferredCountry] || (euroRegions.has(inferredCountry) ? "EUR" : "USD")
@@ -691,6 +1049,15 @@ function applyTheme() {
 
 function formatDate(value) {
   return new Intl.DateTimeFormat(state.locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+}
+
+function formatAmount(amount, currency = "USD") {
+  const numericAmount = Number(amount ?? 0) / 100;
+  try {
+    return new Intl.NumberFormat(state.locale, { style: "currency", currency }).format(numericAmount);
+  } catch {
+    return `${currency} ${numericAmount.toFixed(2)}`;
+  }
 }
 
 function formatShortDate(value) {
