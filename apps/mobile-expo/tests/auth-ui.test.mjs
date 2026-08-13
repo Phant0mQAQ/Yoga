@@ -13,6 +13,8 @@ assert.match(authScreen, /<KeyboardAvoidingView/);
 assert.match(authScreen, /automaticallyAdjustKeyboardInsets=\{process\.env\.EXPO_OS === "ios"\}/);
 assert.match(authScreen, /scrollToEnd\(\{ animated: true \}\)/);
 assert.match(authScreen, /onFocus=\{revealForm\}/);
+assert.match(authScreen, /window\.visualViewport/);
+assert.match(authScreen, /viewport\.addEventListener\("resize", revealFocusedField\)/);
 assert.match(authScreen, /process\.env\.EXPO_OS === "web"/);
 assert.match(authScreen, /setWebMenuOpen\(\(open\) => !open\)/);
 assert.match(authScreen, /styles\.webRoleMenu/);

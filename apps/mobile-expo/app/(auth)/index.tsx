@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ActionSheetIOS, Alert, Image, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import type { Role } from "@/api/types";
@@ -32,6 +32,21 @@ export default function AuthScreen() {
   function revealForm() {
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
   }
+
+  useEffect(() => {
+    if (process.env.EXPO_OS !== "web" || typeof window === "undefined") return;
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+
+    function revealFocusedField() {
+      if (document.activeElement instanceof HTMLInputElement) {
+        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 50);
+      }
+    }
+
+    viewport.addEventListener("resize", revealFocusedField);
+    return () => viewport.removeEventListener("resize", revealFocusedField);
+  }, []);
 
   async function submit() {
     if (requestInFlight.current) return;
