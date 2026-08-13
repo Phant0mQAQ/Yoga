@@ -107,6 +107,7 @@ const $ = (selector) => document.querySelector(selector);
 const copy = (key) => messages[state.locale]?.[key] || messages.en[key] || key;
 
 applyTheme();
+setupViewportHandling();
 boot();
 window.addEventListener("focus", () => void refreshDataSilently());
 document.addEventListener("visibilitychange", () => {
@@ -115,6 +116,54 @@ document.addEventListener("visibilitychange", () => {
 window.setInterval(() => {
   if (!document.hidden) void refreshDataSilently();
 }, DATA_REFRESH_INTERVAL_MS);
+
+function setupViewportHandling() {
+  const viewport = window.visualViewport;
+  const isIosStandalone = navigator.standalone === true;
+  let restingViewportHeight = Math.max(window.innerHeight, viewport?.height || 0);
+
+  document.documentElement.classList.toggle("ios-standalone", isIosStandalone);
+
+  function updateViewport() {
+    const viewportHeight = viewport?.height || window.innerHeight;
+    const activeElement = document.activeElement;
+    const formControlFocused = isFormControl(activeElement);
+
+    if (!formControlFocused) restingViewportHeight = Math.max(window.innerHeight, viewportHeight);
+
+    const keyboardVisible = formControlFocused && restingViewportHeight - viewportHeight > 120;
+    document.documentElement.style.setProperty("--visual-viewport-height", `${Math.round(viewportHeight)}px`);
+    document.documentElement.classList.toggle("keyboard-visible", keyboardVisible);
+
+    if (keyboardVisible) revealActiveForm();
+  }
+
+  viewport?.addEventListener("resize", updateViewport);
+  viewport?.addEventListener("scroll", updateViewport);
+  window.addEventListener("resize", updateViewport);
+  document.addEventListener("focusin", handleFormFocus);
+  document.addEventListener("focusout", () => window.setTimeout(updateViewport, 100));
+  updateViewport();
+
+  function handleFormFocus(event) {
+    if (!isFormControl(event.target)) return;
+    window.setTimeout(updateViewport, 80);
+    window.setTimeout(revealActiveForm, 350);
+  }
+
+  function revealActiveForm() {
+    const activeElement = document.activeElement;
+    if (!isFormControl(activeElement)) return;
+    const target = activeElement.closest(".form-stack") || activeElement;
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+}
+
+function isFormControl(element) {
+  return element instanceof HTMLInputElement
+    || element instanceof HTMLTextAreaElement
+    || element instanceof HTMLSelectElement;
+}
 
 async function boot() {
   if (state.token) {

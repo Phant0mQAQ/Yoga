@@ -176,9 +176,13 @@ assert.match(
 assert.match(html, /good-vibe-mobile-theme/);
 assert.match(html, /prefers-color-scheme: dark/);
 assert.match(html, /good-vibe-icon-192\.png/);
+assert.match(html, /apple-mobile-web-app-capable/);
+assert.match(html, /apple-mobile-web-app-status-bar-style/);
 assert.match(styles, /:root\[data-theme="dark"\]/);
 assert.match(styles, /html\[data-theme="dark"\] \{ color-scheme: dark; \}/);
 assert.match(styles, /\.theme-toggle/);
+assert.match(styles, /html\.ios-standalone \.shell/);
+assert.match(styles, /html\.keyboard-visible \.login-intro/);
 assert.match(styles, /--nav-bg:/);
 assert.match(styles, /\.metric strong \{[^}]*color: var\(--ink\)/);
 assert.match(styles, /\.class-card:not\(\.featured\)[^}]*color: var\(--ink\)/);
@@ -206,6 +210,9 @@ assert.match(styles, /\.profile-avatar \{/);
 assert.match(styles, /\.avatar img \{/);
 assert.match(styles, /\.catalog-grid \{/);
 assert.match(styles, /\.editorial-card \{/);
+assert.match(script, /window\.visualViewport/);
+assert.match(script, /document\.addEventListener\("focusin", handleFormFocus\)/);
+assert.match(script, /scrollIntoView\(\{ behavior: "smooth", block: "center" \}\)/);
 
 const sessionMetricsStart = script.indexOf("function isSessionFull");
 const sessionMetricsEnd = script.indexOf("\n\nfunction hasActiveBookingForSession", sessionMetricsStart);
