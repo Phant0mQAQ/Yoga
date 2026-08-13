@@ -2,6 +2,9 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "good-vibe-pilates-yoga",
   "main": "./deploy/cloudflare/worker.js",
+  "build": {
+    "command": "npm run build:cloudflare"
+  },
   "workers_dev": true,
   "preview_urls": false,
   "compatibility_date": "2026-07-19",

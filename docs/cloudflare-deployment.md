@@ -22,6 +22,11 @@ npm test
 npm run deploy:cloudflare
 ```
 
+Wrangler runs `npm run build:cloudflare` through the checked-in `build.command`
+before local deployments and Cloudflare Git preview/production uploads. Keep the
+Cloudflare dashboard build command empty so the same repository-owned build step
+is used everywhere.
+
 The public URL is `https://good-vibe-pilates-yoga.2316196563.workers.dev`.
 
 `APP_SECRET` is stored as an encrypted Worker Secret and must never be added to `wrangler.jsonc`. The staging deployment uses the D1 seed accounts, local password authentication, and mock Stripe responses. Do not load real customer data into it.

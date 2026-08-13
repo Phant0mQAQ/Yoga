@@ -12,7 +12,7 @@
     "preflight": "node scripts/release-preflight.mjs",
     "preflight:cloud": "node scripts/release-preflight.mjs --cloud",
     "build:cloudflare": "node scripts/build-cloudflare.mjs",
-    "deploy:cloudflare": "npm run build:cloudflare && wrangler deploy",
+    "deploy:cloudflare": "wrangler deploy",
     "preflight:alibaba": "node --env-file=.env.alibaba scripts/release-preflight.mjs --alibaba",
     "migrate:alibaba:state": "node --env-file=.env.alibaba scripts/migrate-supabase-to-rds.mjs",
     "migrate:alibaba:assets": "node --env-file=.env.alibaba scripts/migrate-supabase-storage-to-oss.mjs",

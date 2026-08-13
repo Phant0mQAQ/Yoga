@@ -2,10 +2,21 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const config = JSON.parse(fs.readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8"));
+const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const worker = fs.readFileSync(new URL("../deploy/cloudflare/worker.js", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../apps/api/server.js", import.meta.url), "utf8");
 const mobileClient = fs.readFileSync(new URL("../apps/mobile-expo/src/api/client.ts", import.meta.url), "utf8");
 
+assert.equal(
+  config.build?.command,
+  "npm run build:cloudflare",
+  "Wrangler must build static assets before local, preview, or production uploads"
+);
+assert.equal(
+  packageJson.scripts?.["deploy:cloudflare"],
+  "wrangler deploy",
+  "The deployment script must rely on Wrangler's shared custom build step"
+);
 assert.equal(
   config.vars?.AUTH_PROVIDER,
   "local",
