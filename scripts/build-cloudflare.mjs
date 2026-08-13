@@ -31,6 +31,8 @@ execFileSync(process.execPath, [
   }
 });
 
+patchMobileWebDocument(path.join(mobileExpoOutput, "index.html"));
+
 emptyDirectory(output);
 const adminOutput = path.join(output, "admin");
 fs.mkdirSync(adminOutput, { recursive: true });
@@ -41,6 +43,22 @@ fs.cpSync(path.join(root, "apps", "admin", "assets"), path.join(adminOutput, "as
 fs.cpSync(mobileExpoOutput, path.join(output, "app"), { recursive: true });
 
 console.log(`Built Cloudflare assets in ${output}`);
+
+function patchMobileWebDocument(file) {
+  const defaultViewport = '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />';
+  const safeViewport = [
+    '<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, viewport-fit=cover" />',
+    '    <meta name="apple-mobile-web-app-capable" content="yes" />',
+    '    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />'
+  ].join("\n");
+  const document = fs.readFileSync(file, "utf8");
+
+  if (!document.includes(defaultViewport)) {
+    throw new Error("Expo Web viewport template changed; safe-area metadata was not applied");
+  }
+
+  fs.writeFileSync(file, document.replace(defaultViewport, safeViewport));
+}
 
 function emptyDirectory(directory) {
   fs.mkdirSync(directory, { recursive: true });

@@ -1,6 +1,6 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRef, useState } from "react";
-import { ActionSheetIOS, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ActionSheetIOS, Alert, Image, KeyboardAvoidingView, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import type { Role } from "@/api/types";
 import { Field, GhostButton, PrimaryButton, Screen } from "@/components/ui";
@@ -26,7 +26,12 @@ export default function AuthScreen() {
   const [pendingEmail, setPendingEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const requestInFlight = useRef(false);
+  const scrollRef = useRef<ScrollView>(null);
   const styles = useThemedStyles(createStyles);
+
+  function revealForm() {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
+  }
 
   async function submit() {
     if (requestInFlight.current) return;
@@ -125,11 +130,18 @@ export default function AuthScreen() {
       eyebrow={t("authRoleHint")}
       action={session.role || pendingEmail ? null : <RoleSwitcher role={role} onSelect={chooseRole} />}
     >
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={styles.scroll}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        behavior={process.env.EXPO_OS === "ios" ? "padding" : undefined}
+        style={styles.keyboardAvoider}
       >
+        <ScrollView
+          ref={scrollRef}
+          automaticallyAdjustKeyboardInsets={process.env.EXPO_OS === "ios"}
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={styles.scroll}
+          keyboardDismissMode={process.env.EXPO_OS === "ios" ? "interactive" : "on-drag"}
+          keyboardShouldPersistTaps="handled"
+        >
         <View style={styles.intro}>
           <Image
             accessibilityLabel="Good Vibe Pilates & Yoga logo"
@@ -177,19 +189,20 @@ export default function AuthScreen() {
                 <Text style={styles.formTitle}>{t(mode)} · {t(role)}</Text>
                 <Text style={styles.formMeta}>{t("roleLocked")}</Text>
               </View>
-              {mode === "register" ? <Field value={name} onChangeText={setName} placeholder={t("fullName")} /> : null}
-              <Field value={email} onChangeText={setEmail} placeholder={t("emailPlaceholder")} keyboardType="email-address" />
+              {mode === "register" ? <Field value={name} onChangeText={setName} onFocus={revealForm} placeholder={t("fullName")} /> : null}
+              <Field value={email} onChangeText={setEmail} onFocus={revealForm} placeholder={t("emailPlaceholder")} keyboardType="email-address" />
               {mode === "register" && role === "coach" ? (
                 <Field
                   value={coachInviteCode}
                   onChangeText={setCoachInviteCode}
+                  onFocus={revealForm}
                   placeholder={t("coachInviteCode")}
                   secureTextEntry
                 />
               ) : null}
-              <Field value={password} onChangeText={setPassword} placeholder={t("password")} secureTextEntry />
+              <Field value={password} onChangeText={setPassword} onFocus={revealForm} placeholder={t("password")} secureTextEntry />
               {mode === "register" ? (
-                <Field value={passwordConfirmation} onChangeText={setPasswordConfirmation} placeholder={t("confirmPassword")} secureTextEntry />
+                <Field value={passwordConfirmation} onChangeText={setPasswordConfirmation} onFocus={revealForm} placeholder={t("confirmPassword")} secureTextEntry />
               ) : null}
               {role === "admin" ? (
                 <View style={styles.restrictedNotice}>
@@ -216,7 +229,8 @@ export default function AuthScreen() {
             </>
           )}
         </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </Screen>
   );
 }
@@ -328,6 +342,7 @@ function isEmail(value: string) {
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
+    keyboardAvoider: { flex: 1 },
     scroll: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.xl },
     intro: { alignItems: "center", paddingVertical: spacing.md },
     logo: { width: 176, height: 208, borderRadius: radius.lg, marginBottom: spacing.sm },

@@ -6,6 +6,7 @@ const packageJson = JSON.parse(fs.readFileSync(new URL("../package.json", import
 const worker = fs.readFileSync(new URL("../deploy/cloudflare/worker.js", import.meta.url), "utf8");
 const server = fs.readFileSync(new URL("../apps/api/server.js", import.meta.url), "utf8");
 const mobileClient = fs.readFileSync(new URL("../apps/mobile-expo/src/api/client.ts", import.meta.url), "utf8");
+const cloudflareBuild = fs.readFileSync(new URL("../scripts/build-cloudflare.mjs", import.meta.url), "utf8");
 
 assert.equal(
   config.build?.command,
@@ -47,5 +48,9 @@ assert.match(server, /requireRole\(auth, \[ROLES\.ADMIN\]\)/);
 assert.match(server, /cloudflareMediaBucket\.put\(objectKey, body/);
 assert.match(mobileClient, /uploadAdminFile/);
 assert.match(mobileClient, /headers\.Authorization = `Bearer \$\{authToken\}`/);
+assert.match(cloudflareBuild, /patchMobileWebDocument/);
+assert.match(cloudflareBuild, /viewport-fit=cover/);
+assert.match(cloudflareBuild, /apple-mobile-web-app-capable/);
+assert.match(cloudflareBuild, /apple-mobile-web-app-status-bar-style/);
 
 console.log("Cloudflare staging authentication config tests passed");

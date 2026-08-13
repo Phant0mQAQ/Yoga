@@ -9,6 +9,10 @@ const sharedUi = fs.readFileSync("src/components/ui.tsx", "utf8");
 assert.match(authScreen, /const roles: Role\[\] = \["student", "coach", "admin"\]/);
 assert.match(authScreen, /action=\{session\.role \|\| pendingEmail \? null : <RoleSwitcher/);
 assert.match(authScreen, /<Screen[\s\S]*<RoleSwitcher[\s\S]*contentInsetAdjustmentBehavior="automatic"/);
+assert.match(authScreen, /<KeyboardAvoidingView/);
+assert.match(authScreen, /automaticallyAdjustKeyboardInsets=\{process\.env\.EXPO_OS === "ios"\}/);
+assert.match(authScreen, /scrollToEnd\(\{ animated: true \}\)/);
+assert.match(authScreen, /onFocus=\{revealForm\}/);
 assert.match(authScreen, /process\.env\.EXPO_OS === "web"/);
 assert.match(authScreen, /setWebMenuOpen\(\(open\) => !open\)/);
 assert.match(authScreen, /styles\.webRoleMenu/);
@@ -25,6 +29,7 @@ assert.match(authScreen, /mode === "register" && role === "coach"/);
 assert.match(authScreen, /placeholder=\{t\("coachInviteCode"\)\}/);
 assert.match(authScreen, /t\("adminSignInOnly"\)/);
 assert.doesNotMatch(authScreen, /"staff"/);
+assert.match(sharedUi, /onFocus\?: \(\) => void/);
 
 assert.match(apiClient, /request<RegistrationStartResponse>\("\/auth\/register"/);
 assert.doesNotMatch(apiClient, /\/auth\/email\/verify/);

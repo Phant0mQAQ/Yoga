@@ -204,13 +204,15 @@ export function Field({
   onChangeText,
   placeholder,
   keyboardType = "default",
-  secureTextEntry = false
+  secureTextEntry = false,
+  onFocus
 }: {
   value: string;
   onChangeText: (value: string) => void;
   placeholder: string;
   keyboardType?: "default" | "email-address" | "phone-pad" | "number-pad";
   secureTextEntry?: boolean;
+  onFocus?: () => void;
 }) {
   const { colors, styles } = useUiTheme();
 
@@ -224,6 +226,7 @@ export function Field({
       autoCorrect={false}
       keyboardType={keyboardType}
       secureTextEntry={secureTextEntry}
+      onFocus={onFocus}
       style={styles.field}
     />
   );
