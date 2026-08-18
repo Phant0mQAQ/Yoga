@@ -31,7 +31,7 @@ The public URL is `https://good-vibe-pilates-yoga.2316196563.workers.dev`.
 
 `APP_SECRET` and `FIREBASE_WEB_API_KEY` are stored as encrypted Worker Secrets and must never be added to `wrangler.jsonc`. The staging deployment uses Firebase Authentication with D1 business records and mock Stripe responses. Do not load real customer data into it.
 
-Keep `AUTH_PROVIDER` set to `firebase`. Registered identities are linked to Firebase and may no longer have a local password hash, while Firebase also provides the verification email required by student and invited-coach registration. Switching this database back to `local` makes those linked accounts impossible to authenticate and disables registration unless a separate email provider is configured.
+Keep `AUTH_PROVIDER` set to `firebase`. New registrations and identities without a local password use Firebase, which provides the verification email required by student and invited-coach registration. Existing seeded or migrated identities that still have a local password hash remain able to sign in during the transition. Switching this database back to `local` makes Firebase-only accounts impossible to authenticate and disables registration unless a separate email provider is configured.
 
 ## Firebase Authentication
 

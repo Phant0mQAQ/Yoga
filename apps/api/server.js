@@ -26,6 +26,7 @@ import {
   id,
   localizeEntity,
   login,
+  loginWithLocalPasswordIfAvailable,
   loginWithFirebaseUser,
   logout,
   memberCardOperation,
@@ -220,6 +221,14 @@ async function handleIsolatedFirebaseAuth(res, url, body) {
   const pathName = url.pathname.replace("/api/v1", "") || "/";
 
   if (pathName === "/auth/login") {
+    const localResponse = await mutateIsolatedStore(
+      (requestStore) => loginWithLocalPasswordIfAvailable(requestStore, body, signToken),
+      { shouldPersist: (result) => result !== null }
+    );
+    if (localResponse) {
+      sendJson(res, 200, localResponse);
+      return;
+    }
     const firebaseAccount = await firebaseAuthProvider.signIn({
       email: normalizeIdentity(body.identifier ?? body.email),
       password: body.password,
@@ -305,7 +314,10 @@ async function handleIsolatedFirebaseAuth(res, url, body) {
   });
 }
 
-async function mutateIsolatedStore(handler, { maxAttempts = 3 } = {}) {
+async function mutateIsolatedStore(handler, {
+  maxAttempts = 3,
+  shouldPersist = () => true
+} = {}) {
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const repository = createStoreRepository();
     const requestStore = await operationWithTimeout(
@@ -316,6 +328,7 @@ async function mutateIsolatedStore(handler, { maxAttempts = 3 } = {}) {
     );
     try {
       const result = await handler(requestStore);
+      if (!shouldPersist(result)) return result;
       await operationWithTimeout(
         repository.save(requestStore),
         8_000,
@@ -405,6 +418,11 @@ async function routeApi(req, res, url, body, auth) {
   if (method === "POST" && pathName === "/auth/login") {
     if (!usesFirebaseAuth) {
       sendJson(res, 200, login(store, body, signToken));
+      return;
+    }
+    const localResponse = loginWithLocalPasswordIfAvailable(store, body, signToken);
+    if (localResponse) {
+      sendJson(res, 200, localResponse);
       return;
     }
     const firebaseAccount = await firebaseAuthProvider.signIn({

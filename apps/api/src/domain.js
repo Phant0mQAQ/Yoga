@@ -620,6 +620,15 @@ export function login(store, { identifier, email, password, role, locale = "en" 
   return createRoleSession(store, user, role, locale, signToken);
 }
 
+export function loginWithLocalPasswordIfAvailable(store, credentials, signToken) {
+  const normalizedEmail = normalizeEmail(credentials?.identifier ?? credentials?.email);
+  const identity = store.authIdentities.find(
+    (item) => item.type === "email" && item.value === normalizedEmail
+  );
+  if (!identity?.passwordHash) return null;
+  return login(store, credentials, signToken);
+}
+
 export function prepareFirebaseRegistration(store, {
   name,
   email: emailInput,

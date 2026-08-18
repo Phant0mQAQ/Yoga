@@ -11,6 +11,7 @@ import {
   getPaymentMethods,
   hardenProductionStore,
   login,
+  loginWithLocalPasswordIfAvailable,
   loginWithFirebaseUser,
   prepareFirebaseRegistration,
   repairOperationalState,
@@ -41,6 +42,28 @@ const studentAuth = {
 
 assert.equal(studentLogin.session.activeRole, ROLES.STUDENT);
 assert.equal(verifyToken(studentLogin.token, store).activeRole, ROLES.STUDENT);
+
+{
+  const compatibilityStore = createSeedStore();
+  const localStudent = loginWithLocalPasswordIfAvailable(compatibilityStore, {
+    email: "student@example.com",
+    password: DEMO_PASSWORD,
+    role: ROLES.STUDENT,
+    locale: "en"
+  }, signToken);
+  assert.equal(localStudent.session.activeRole, ROLES.STUDENT);
+
+  const firebaseOnlyIdentity = compatibilityStore.authIdentities.find(
+    (item) => item.value === "student@example.com"
+  );
+  delete firebaseOnlyIdentity.passwordHash;
+  assert.equal(loginWithLocalPasswordIfAvailable(compatibilityStore, {
+    email: "student@example.com",
+    password: DEMO_PASSWORD,
+    role: ROLES.STUDENT,
+    locale: "en"
+  }, signToken), null);
+}
 
 {
   const operationalStore = createSeedStore();
