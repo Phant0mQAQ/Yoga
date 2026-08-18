@@ -25,8 +25,8 @@ assert.deepEqual(
 );
 assert.equal(
   config.vars?.AUTH_PROVIDER,
-  "local",
-  "The public Cloudflare review deployment must keep the seeded review accounts available"
+  "firebase",
+  "Cloudflare must use Firebase so registered identities remain compatible and verification email delivery is available"
 );
 assert.equal(
   config.define?.["process.env.NODE_ENV"],

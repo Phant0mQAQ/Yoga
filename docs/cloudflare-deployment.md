@@ -29,9 +29,9 @@ is used everywhere.
 
 The public URL is `https://good-vibe-pilates-yoga.2316196563.workers.dev`.
 
-`APP_SECRET` is stored as an encrypted Worker Secret and must never be added to `wrangler.jsonc`. The staging deployment uses the D1 seed accounts, local password authentication, and mock Stripe responses. Do not load real customer data into it.
+`APP_SECRET` and `FIREBASE_WEB_API_KEY` are stored as encrypted Worker Secrets and must never be added to `wrangler.jsonc`. The staging deployment uses Firebase Authentication with D1 business records and mock Stripe responses. Do not load real customer data into it.
 
-Keep `AUTH_PROVIDER` set to `local` while the public demo credentials from the README are enabled. Those accounts exist in D1 and are intentionally limited to this staging environment.
+Keep `AUTH_PROVIDER` set to `firebase`. Registered identities are linked to Firebase and may no longer have a local password hash, while Firebase also provides the verification email required by student and invited-coach registration. Switching this database back to `local` makes those linked accounts impossible to authenticate and disables registration unless a separate email provider is configured.
 
 ## Firebase Authentication
 
@@ -43,7 +43,7 @@ Keep `AUTH_PROVIDER` set to `local` while the public demo credentials from the R
 npm exec --yes --package=wrangler@latest -- wrangler secret put FIREBASE_WEB_API_KEY
 ```
 
-4. Create and verify the required Firebase users first, then change `AUTH_PROVIDER` to `firebase` in `wrangler.jsonc`, build, and deploy.
+4. Create and verify the required seeded coach and administrator users, confirm `AUTH_PROVIDER` is `firebase` in `wrangler.jsonc`, then build and deploy.
 5. In Firebase Authentication, create every existing coach and administrator with the same email used in D1. After they verify the Firebase email and sign in, the API links the Firebase UID to the existing D1 user and removes the legacy password hash.
 
 Firebase sends and hosts the verification link, so this flow does not require Resend, Bizcn access, or a custom sending domain. iOS, the Expo Web build, `/app`, and `/admin` continue to use the same `/api/v1` backend and D1 business records.

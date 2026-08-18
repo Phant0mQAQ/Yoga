@@ -15,7 +15,7 @@
   "vars": {
     "APP_BASE_URL": "https://good-vibe-pilates-yoga.2316196563.workers.dev",
     "CORS_ALLOWED_ORIGINS": "https://good-vibe-pilates-yoga.2316196563.workers.dev",
-    "AUTH_PROVIDER": "local",
+    "AUTH_PROVIDER": "firebase",
     "FIREBASE_REQUEST_TIMEOUT_MS": "10000",
     "LEGAL_OPERATOR_NAME": "Good Vibe Pilates & Yoga",
     "LEGAL_POSTAL_ADDRESS": "California, United States",
